@@ -1,0 +1,16 @@
+# Generated reports
+pagespeed_report*.html
+pagespeed_report*.csv
+report*.html
+report*.csv
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
