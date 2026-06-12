@@ -102,6 +102,7 @@ function http_get(string $url, int $timeout = 30): string {
         CURLOPT_TIMEOUT        => $timeout,
         CURLOPT_USERAGENT      => 'PageSpeedBulkScanner-PHP/1.0',
         CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_ENCODING       => '',   // accept + auto-decode gzip/deflate transfer encoding
     ]);
     $body = curl_exec($ch);
     $err  = curl_error($ch);
@@ -114,6 +115,13 @@ function http_get(string $url, int $timeout = 30): string {
     if ($code >= 400) {
         throw new RuntimeException("HTTP $code for $url");
     }
+    // Handle .xml.gz files served as raw gzip (magic bytes 1f 8b)
+    if (strncmp($body, "\x1f\x8b", 2) === 0 && function_exists('gzdecode')) {
+        $decoded = gzdecode($body);
+        if ($decoded !== false) {
+            $body = $decoded;
+        }
+    }
     return $body;
 }
 
@@ -123,13 +131,31 @@ function http_get(string $url, int $timeout = 30): string {
 
 /**
  * Derive a human-readable group label from a sub-sitemap URL.
- * e.g. '.../post-sitemap.xml' -> 'Posts' ... well, 'Post' (title-cased stem)
+ * Handles multiple sitemap naming conventions:
+ *   Yoast:    post-sitemap.xml                          -> 'Post'
+ *             app_service-sitemap.xml                   -> 'Service'
+ *   Shopify:  sitemap_products_1.xml?from=...&to=...    -> 'Products'
+ *             sitemap_collections_1.xml                 -> 'Collections'
+ *             sitemap_blogs_1.xml                       -> 'Blogs'
+ *   Generic:  sitemap-news.xml, news_sitemap.xml, etc.
+ * Pagination suffixes (_1, -2) are stripped so paginated sitemaps
+ * group together.
  */
 function sitemap_group_name(string $url): string {
+    // basename of the path only — drops Shopify's ?from=...&to=... query string
     $stem = basename(parse_url($url, PHP_URL_PATH) ?? $url);
-    $stem = str_replace(['-sitemap.xml', '_sitemap.xml'], '', $stem);
-    $stem = str_replace(['app_', '-', '_'], ['', ' ', ' '], $stem);
-    return ucwords(trim($stem)) ?: 'Other';
+    $stem = preg_replace('/\.xml(\.gz)?$/i', '', $stem);
+    // Yoast style: {type}-sitemap / {type}_sitemap
+    $stem = preg_replace('/[-_]sitemap$/i', '', $stem);
+    // Shopify style: sitemap_{type} / sitemap-{type}
+    $stem = preg_replace('/^sitemap[-_]?/i', '', $stem);
+    // Pagination suffix: products_1, posts-2 …
+    $stem = preg_replace('/[-_]\d+$/', '', $stem);
+    // Yoast custom-post-type prefix
+    $stem = preg_replace('/^app_/i', '', $stem);
+    $stem = str_replace(['-', '_'], ' ', $stem);
+    $stem = ucwords(trim($stem));
+    return $stem !== '' ? $stem : 'Pages';
 }
 
 /**
