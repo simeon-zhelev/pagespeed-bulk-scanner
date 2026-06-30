@@ -126,6 +126,96 @@ function http_get(string $url, int $timeout = 30): string {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  Sitemap discovery (used by the web UI — accepts a plain site URL/domain)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Does this URL look like it points at a sitemap (vs a plain page)? */
+function looks_like_sitemap(string $url): bool {
+    $path = strtolower((string)parse_url($url, PHP_URL_PATH));
+    return (bool)preg_match('/\.xml(\.gz)?$/', $path) || strpos($path, 'sitemap') !== false;
+}
+
+/** Is this XML string a valid sitemap or sitemap index? */
+function is_sitemap_xml(string $body): bool {
+    libxml_use_internal_errors(true);
+    $xml = simplexml_load_string($body);
+    libxml_clear_errors();
+    return $xml !== false && in_array($xml->getName(), ['sitemapindex', 'urlset'], true);
+}
+
+/**
+ * Resolve a user-supplied URL into a usable sitemap URL.
+ *
+ * Accepts either a direct sitemap URL (returned as-is) or a plain site URL /
+ * domain, in which case it auto-discovers the sitemap by (1) reading robots.txt
+ * for `Sitemap:` directives, then (2) probing common sitemap paths.
+ * Returns the discovered sitemap URL, or null if none could be confirmed.
+ * $log is an optional callback for progress lines (defaults to echo).
+ */
+function discover_sitemap(string $input, ?callable $log = null): ?string {
+    $say = function (string $m) use ($log) { $log ? $log($m) : print($m . "\n"); };
+
+    $input = trim($input);
+    if ($input === '') return null;
+    if (!preg_match('#^https?://#i', $input)) {
+        $input = 'https://' . ltrim($input, '/');
+    }
+
+    // Already a sitemap URL? Use it directly.
+    if (looks_like_sitemap($input)) return $input;
+
+    $say("🔎 Auto-discovering sitemap for $input …");
+
+    $parts = parse_url($input);
+    $host  = $parts['host'] ?? '';
+    if ($host === '') return null;
+    $origin = ($parts['scheme'] ?? 'https') . '://' . $host
+            . (isset($parts['port']) ? ':' . $parts['port'] : '');
+
+    $candidates = [];
+
+    // 1 — robots.txt Sitemap: directives (the authoritative source)
+    try {
+        $robots = http_get($origin . '/robots.txt', 10);
+        if (preg_match_all('/^\s*Sitemap:\s*(\S+)/im', $robots, $m)) {
+            foreach ($m[1] as $loc) {
+                $loc = trim($loc);
+                if ($loc !== '') $candidates[] = $loc;
+            }
+            if ($candidates) $say('   robots.txt lists ' . count($candidates) . ' sitemap(s).');
+        }
+    } catch (Throwable $e) {
+        // No robots.txt — fall through to common paths.
+    }
+
+    // 2 — Common sitemap locations (WordPress/Yoast, Shopify, generic)
+    foreach ([
+        '/sitemap_index.xml', '/sitemap-index.xml', '/sitemap.xml',
+        '/wp-sitemap.xml', '/sitemap.xml.gz', '/sitemap/sitemap.xml',
+    ] as $p) {
+        $candidates[] = $origin . $p;
+    }
+
+    // Probe each candidate; return the first that is a real sitemap.
+    $seen = [];
+    foreach ($candidates as $url) {
+        if (isset($seen[$url])) continue;
+        $seen[$url] = true;
+        try {
+            $body = http_get($url, 12);
+        } catch (Throwable $e) {
+            continue;
+        }
+        if (is_sitemap_xml($body)) {
+            $say("   ✓ Found sitemap: $url");
+            return $url;
+        }
+    }
+
+    return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Sitemap crawling (namespace-agnostic, Yoast-compatible)
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -354,7 +444,8 @@ function make_psi_handle(string $requestUrl) {
  * Run all (url × strategy) jobs through a rolling curl_multi pool.
  * Returns: map  pageUrl => result-row (merged across strategies).
  */
-function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers): array {
+function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
+                  ?callable $onEvent = null): array {
     // Build the full job list: one HTTP request per url+strategy pair
     $jobs = [];
     foreach ($urls as $url) {
@@ -376,8 +467,18 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers)
 
     $totalJobs = count($jobs);
     $doneJobs  = 0;
-    echo "⚡  Scanning " . count($urls) . " URLs × " . count($strategies)
-       . " strategies = $totalJobs requests, $workers parallel workers …\n\n";
+    if (!$onEvent) {
+        echo "⚡  Scanning " . count($urls) . " URLs × " . count($strategies)
+           . " strategies = $totalJobs requests, $workers parallel workers …\n\n";
+    } else {
+        $onEvent([
+            'phase'      => 'scan-start',
+            'total'      => $totalJobs,
+            'urls'       => count($urls),
+            'workers'    => $workers,
+            'strategies' => $strategies,
+        ]);
+    }
 
     $mh = curl_multi_init();
     $active = [];   // (int)$ch handle id => job
@@ -418,7 +519,12 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers)
 
             if ($code === 429 && !$job['retried']) {
                 // Rate-limited: requeue once after a pause
-                echo "    ⏳  429 rate-limited ({$job['strategy']}) $url — retrying in 15 s …\n";
+                if ($onEvent) {
+                    $onEvent(['phase' => 'rate-limit', 'url' => $url,
+                              'strategy' => $job['strategy']]);
+                } else {
+                    echo "    ⏳  429 rate-limited ({$job['strategy']}) $url — retrying in 15 s …\n";
+                }
                 sleep(15);
                 $job['retried'] = true;
                 $enqueue($job);
@@ -432,13 +538,34 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers)
                     $results[$url]["{$prefix}_{$k}"] = null;
                 }
                 $results[$url]["{$prefix}_error"] = $msg;
-                echo "  [$doneJobs/$totalJobs] ✗ [{$job['strategy']}] $url — $msg\n";
+                if (!$onEvent) {
+                    echo "  [$doneJobs/$totalJobs] ✗ [{$job['strategy']}] $url — $msg\n";
+                }
             } else {
                 $parsed = parse_psi_response($body, $prefix);
                 $results[$url] = array_merge($results[$url], $parsed);
-                $score = $parsed["{$prefix}_perf"] ?? '—';
-                $scoreStr = $score === null ? 'ERR' : $score;
-                echo "  [$doneJobs/$totalJobs] ✓ [{$job['strategy']}] perf=$scoreStr  $url\n";
+                if (!$onEvent) {
+                    $score = $parsed["{$prefix}_perf"] ?? '—';
+                    $scoreStr = $score === null ? 'ERR' : $score;
+                    echo "  [$doneJobs/$totalJobs] ✓ [{$job['strategy']}] perf=$scoreStr  $url\n";
+                }
+            }
+
+            if ($onEvent) {
+                $perr = $results[$url]["{$prefix}_error"] ?? null;
+                $onEvent([
+                    'phase'    => 'job',
+                    'done'     => $doneJobs,
+                    'total'    => $totalJobs,
+                    'url'      => $url,
+                    'strategy' => $job['strategy'],
+                    'ok'       => $perr === null,
+                    'perf'     => $results[$url]["{$prefix}_perf"]  ?? null,
+                    'a11y'     => $results[$url]["{$prefix}_a11y"]  ?? null,
+                    'seo'      => $results[$url]["{$prefix}_seo"]   ?? null,
+                    'bp'       => $results[$url]["{$prefix}_bp"]    ?? null,
+                    'error'    => $perr,
+                ]);
             }
 
             // Feed the pool

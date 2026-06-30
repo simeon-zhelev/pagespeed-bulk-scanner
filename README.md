@@ -43,6 +43,19 @@ php pagespeed_scanner.php \
 
 **Tip:** for a first run on a large site, do a trial with `--max-urls=20` to verify everything works before scanning all pages.
 
+## Web UI
+
+Prefer a browser to the command line? A small, light-themed landing page is included in `web/`. Enter a **website address** (the sitemap is found automatically) or a sitemap URL, add your API key, pick your options, and it streams **live per-page progress** and shows the full report inline (plus HTML and CSV downloads) — no command line needed. A **single-page** mode is also available for scanning one URL.
+
+```bash
+# Start the built-in PHP web server, then open http://127.0.0.1:8001
+php -S 127.0.0.1:8001 -t web
+```
+
+It reuses the exact same engine as the CLI — `pagespeed_scanner.php` — so results are identical. Generated reports are written to `web/reports/` (git-ignored).
+
+> **Note:** the web UI runs scans on demand and your API key is sent to it, so keep it bound to `127.0.0.1` / a trusted network rather than exposing it publicly.
+
 ## Getting an API key
 
 1. Open the [PageSpeed Insights API page](https://console.cloud.google.com/apis/library/pagespeedonline.googleapis.com) in Google Cloud Console
@@ -116,6 +129,11 @@ Cron example — every Monday at 07:00, with dated report files:
 ```
 pagespeed-bulk-scanner/
 ├── pagespeed_scanner.php   # the scanner — single file, no dependencies
+├── web/                    # browser front-end (php -S 127.0.0.1:8000 -t web)
+│   ├── index.php           #   form + live progress + inline report
+│   ├── scan.php            #   Server-Sent Events endpoint (reuses the scanner)
+│   └── reports/            #   generated HTML/CSV reports (git-ignored)
+│   #   start with: php -S 127.0.0.1:8001 -t web
 ├── README.md
 ├── LICENSE                 # MIT
 └── .gitignore
