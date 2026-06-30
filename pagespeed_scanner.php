@@ -1028,53 +1028,58 @@ function build_html(array $results, array $urlToGroup, array $strategies,
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   body  { font-family: system-ui, -apple-system, sans-serif;
-          background: #0f172a; color: #e2e8f0; margin: 0; padding: 24px 28px; }
-  h1    { font-size: 1.6rem; margin-bottom: 4px; color: #f8fafc; }
+          background: #f1f5f9; color: #1e293b; margin: 0; padding: 24px 28px; }
+  h1    { font-size: 1.6rem; margin-bottom: 4px; color: #0f172a; }
   .meta { font-size: 0.8rem; color: #64748b; margin-bottom: 28px; }
   .section-title { font-size: 0.8rem; font-weight: 700; color: #64748b;
                    text-transform: uppercase; letter-spacing: .1em;
                    margin: 32px 0 10px; }
   .cards { display: flex; flex-wrap: wrap; gap: 12px; }
-  .card  { background: #1e293b; border-radius: 10px; padding: 16px 22px;
-           min-width: 148px; flex: 1; }
-  .card-label { font-size: 0.72rem; color: #94a3b8; text-transform: uppercase;
+  .card  { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px;
+           padding: 16px 22px; min-width: 148px; flex: 1;
+           box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
+  .card-label { font-size: 0.72rem; color: #64748b; text-transform: uppercase;
                 letter-spacing: .06em; }
   .card-score { font-size: 2.4rem; font-weight: 700; line-height: 1.1; margin: 4px 0; }
-  .card-sub   { font-size: 0.7rem; color: #64748b; }
-  .table-wrap { overflow-x: auto; border-radius: 10px; background: #1e293b; margin-top: 4px; }
+  .card-sub   { font-size: 0.7rem; color: #94a3b8; }
+  .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 10px;
+                background: #ffffff; margin-top: 4px; }
   table  { width: 100%; border-collapse: collapse; font-size: 0.77rem; }
-  th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid #334155; }
-  th     { background: #0f172a; color: #94a3b8; font-weight: 600;
+  th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid #e2e8f0; }
+  th     { background: #f8fafc; color: #475569; font-weight: 600;
            text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
   td.url-cell { text-align: left; max-width: 280px; overflow: hidden;
                 text-overflow: ellipsis; white-space: nowrap; }
-  td.url-cell a { color: #93c5fd; text-decoration: none; }
+  td.url-cell a { color: #2563eb; text-decoration: none; }
   td.url-cell a:hover { text-decoration: underline; }
-  td.gname { text-align: left; font-size: 0.72rem; color: #94a3b8; white-space: nowrap; }
-  td.num   { color: #475569; width: 32px; }
-  tr:hover td { background: #263045; }
+  td.gname { text-align: left; font-size: 0.72rem; color: #64748b; white-space: nowrap; }
+  td.num   { color: #94a3b8; width: 32px; }
+  tr:hover td { background: #f1f5f9; }
   .legend { margin-top: 20px; font-size: 0.72rem; color: #64748b; }
   .dot    { display:inline-block; width:9px; height:9px; border-radius:50%;
             margin-right:4px; vertical-align:middle; }
   /* Optimizations */
   td.opp-title { text-align: left; }
-  .pgbar  { position: relative; background: #0f172a; border-radius: 6px;
+  .pgbar  { position: relative; background: #e2e8f0; border-radius: 6px;
             height: 18px; min-width: 160px; overflow: hidden; }
   .pgfill { background: #3b82f6; height: 100%; border-radius: 6px; opacity: .55; }
   .a11yfill { background: #a855f7; }
   .pgtext { position: absolute; inset: 0; display: flex; align-items: center;
-            justify-content: center; font-size: 0.7rem; color: #e2e8f0; }
+            justify-content: center; font-size: 0.7rem; color: #1e293b; }
   .opp-container { display: flex; flex-direction: column; gap: 6px; }
-  .opp-details   { background: #1e293b; border-radius: 8px; padding: 10px 14px; }
+  .opp-details   { background: #ffffff; border: 1px solid #e2e8f0;
+                   border-radius: 8px; padding: 10px 14px; }
   .opp-details summary { cursor: pointer; font-size: 0.82rem; }
-  .opp-details summary a { color: #93c5fd; text-decoration: none; }
+  .opp-details summary a { color: #2563eb; text-decoration: none; }
   .opp-details summary a:hover { text-decoration: underline; }
   .opp-body     { margin-top: 8px; }
-  .opp-strategy { font-size: 0.72rem; font-weight: 700; color: #94a3b8;
+  .opp-strategy { font-size: 0.72rem; font-weight: 700; color: #64748b;
                   margin-top: 8px; text-transform: uppercase; letter-spacing: .05em; }
   .opp-list     { margin: 4px 0 0; padding-left: 18px; font-size: 0.78rem; }
   .opp-list li  { margin: 3px 0; }
-  .opp-savings  { color: #f59e0b; font-size: 0.72rem; }
+  .opp-savings  { color: #d97706; font-size: 0.72rem; }
+  /* PDF export: drop the grey page background so the print is clean white */
+  @media print { body { background: #ffffff; } }
 </style>
 </head>
 <body>
