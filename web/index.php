@@ -33,6 +33,9 @@
   .field.full { grid-column:1 / -1; }
   label { font-weight:600; font-size:14px; }
   label .hint { font-weight:400; color:var(--muted); font-size:13px; }
+  label.check { display:flex; align-items:center; gap:10px; cursor:pointer; flex-wrap:wrap; }
+  label.check input { width:17px; height:17px; accent-color:var(--accent); cursor:pointer; flex:none; }
+  label.check .hint { flex-basis:100%; margin-left:27px; }
   input[type=text], input[type=url], input[type=number], select {
     font:inherit; padding:11px 13px; border:1px solid #cbd5e1; border-radius:10px; background:#fff; color:var(--ink);
     transition:border-color .15s, box-shadow .15s;
@@ -146,6 +149,14 @@
         <div class="field full" id="maxUrlsField">
           <label for="max_urls">Max pages <span class="hint">— blank = all</span></label>
           <input type="number" id="max_urls" name="max_urls" min="1" placeholder="all (e.g. 20 for a trial)">
+        </div>
+
+        <div class="field full" id="robotsField">
+          <label class="check">
+            <input type="checkbox" id="honour_robots" name="honour_robots" value="1">
+            Honour robots.txt
+            <span class="hint">— skip pages disallowed for crawlers; if unchecked, robots.txt is ignored</span>
+          </label>
         </div>
       </div>
 

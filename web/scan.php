@@ -78,6 +78,7 @@ $strategies = $strategy === 'both' ? ['mobile', 'desktop'] : [$strategy];
 $workers = max(1, min(25, (int)($_GET['workers'] ?? 5)));
 $maxUrls = (isset($_GET['max_urls']) && $_GET['max_urls'] !== '')
     ? max(1, (int)$_GET['max_urls']) : null;
+$honourRobots = !empty($_GET['honour_robots']);
 
 if (!$apiKey) {
     sse('status', ['message' => 'No API key — anonymous quota is small and may rate-limit.']);
@@ -120,6 +121,24 @@ if ($mode === 'url') {
     }
     if (!$urls) {
         fail('No page URLs found. Verify the sitemap URL is reachable and valid.');
+    }
+}
+
+// ── Optionally drop URLs disallowed by robots.txt ────────────────────────────
+if ($honourRobots) {
+    sse('status', ['message' => 'Checking robots.txt…']);
+    ob_start();
+    [$urls, $blocked] = filter_urls_by_robots($urls);
+    ob_end_clean();
+    $urlToGroup = array_intersect_key($urlToGroup, array_flip($urls));
+    if ($blocked) {
+        sse('status', ['message' => "robots.txt disallows {$blocked} URL"
+            . ($blocked === 1 ? '' : 's') . ' — skipped.']);
+    }
+    if (!$urls) {
+        fail($mode === 'url'
+            ? 'This page is disallowed by robots.txt. Uncheck “Honour robots.txt” to scan it anyway.'
+            : 'Every URL is disallowed by robots.txt. Uncheck “Honour robots.txt” to scan anyway.');
     }
 }
 
