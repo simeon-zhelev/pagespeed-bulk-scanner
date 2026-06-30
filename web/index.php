@@ -36,6 +36,8 @@
   label.check { display:flex; align-items:center; gap:10px; cursor:pointer; flex-wrap:wrap; }
   label.check input { width:17px; height:17px; accent-color:var(--accent); cursor:pointer; flex:none; }
   label.check .hint { flex-basis:100%; margin-left:27px; }
+  label.check.remember { margin-top:2px; font-size:13px; font-weight:500; }
+  label.check.remember input { width:15px; height:15px; }
   input[type=text], input[type=url], input[type=number], select {
     font:inherit; padding:11px 13px; border:1px solid #cbd5e1; border-radius:10px; background:#fff; color:var(--ink);
     transition:border-color .15s, box-shadow .15s;
@@ -130,6 +132,11 @@
         <div class="field full">
           <label for="api_key">Google API key <span class="hint">— strongly recommended; anonymous quota is tiny</span></label>
           <input type="text" id="api_key" name="api_key" placeholder="AIza…" autocomplete="off" spellcheck="false">
+          <label class="check remember">
+            <input type="checkbox" id="remember_key" checked>
+            Remember on this browser
+            <span class="hint">— stored only in this browser's local storage</span>
+          </label>
         </div>
 
         <div class="field">
@@ -230,6 +237,32 @@ function applyMode() {
 }
 form.querySelectorAll('input[name="mode"]').forEach(r => r.addEventListener('change', applyMode));
 applyMode();
+
+// Persist the Google API key in this browser's local storage so it survives
+// reloads. Guarded for private-mode/disabled storage.
+const API_KEY_STORE = 'psbs.apiKey';
+const apiKeyInput = document.getElementById('api_key');
+const rememberKey = document.getElementById('remember_key');
+
+function storeApiKey() {
+  try {
+    if (rememberKey.checked && apiKeyInput.value.trim() !== '') {
+      localStorage.setItem(API_KEY_STORE, apiKeyInput.value.trim());
+    } else {
+      localStorage.removeItem(API_KEY_STORE);
+    }
+  } catch (_) { /* storage unavailable — ignore */ }
+}
+
+(function loadApiKey() {
+  try {
+    const saved = localStorage.getItem(API_KEY_STORE);
+    if (saved) { apiKeyInput.value = saved; rememberKey.checked = true; }
+  } catch (_) { /* storage unavailable — ignore */ }
+})();
+
+apiKeyInput.addEventListener('input', storeApiKey);
+rememberKey.addEventListener('change', storeApiKey);
 
 function scoreColor(v) {
   if (v === null || v === undefined) return '#94a3b8';
