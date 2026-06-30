@@ -1,0 +1,20 @@
+{
+  "name": "pagespeed-bulk-scanner",
+  "version": "1.0.0",
+  "description": "Optional PDF-export engine for the PageSpeed Bulk Scanner. Driven by pagespeed_scanner.php; renders the finished HTML report to PDF via headless Chromium (Playwright). The scan itself is pure PHP and needs none of this.",
+  "license": "MIT",
+  "private": true,
+  "bin": {
+    "html-to-pdf": "html-to-pdf.js"
+  },
+  "scripts": {
+    "postinstall": "echo '\\nNext (only needed for PDF export): install the browser engine ->  npx playwright install chromium\\n'",
+    "browser": "playwright install chromium"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0"
+  }
+}

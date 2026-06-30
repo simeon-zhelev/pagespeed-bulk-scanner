@@ -17,12 +17,12 @@ Works with **WordPress (Yoast SEO)**, **Shopify**, and any site with a standard 
 - 🔧 **Optimization opportunities** — site-wide table of failing performance audits ranked by pages affected and estimated savings, plus per-page breakdowns
 - ♿ **Accessibility issues** — WAVE-style automated WCAG checks (missing alt text, contrast errors, missing labels, …) with element counts
 - 📂 **Sitemap group breakdown** — average scores per content type (Posts, Pages, Products, Collections, …)
-- 📄 **Outputs** — dark-themed standalone HTML report, CSV export, console summary
+- 📄 **Outputs** — dark-themed standalone HTML report, CSV export, optional PDF, console summary
 - 🔁 **Rate-limit handling** — automatic retry on HTTP 429
 
 ## Quick start
 
-Requires PHP 7.4+ with `curl` and `simplexml` extensions (enabled by default on macOS, most Linux distros, and all common hosting). No Composer, no dependencies.
+Requires PHP 7.4+ with `curl` and `simplexml` extensions (enabled by default on macOS, most Linux distros, and all common hosting). No Composer, no dependencies. (The optional [PDF export](#pdf-export) adds Node + Playwright — nothing else does.)
 
 ```bash
 # WordPress / Yoast site
@@ -31,7 +31,8 @@ php pagespeed_scanner.php \
   --api-key=YOUR_GOOGLE_API_KEY \
   --strategy=both \
   --workers=10 \
-  --output=report.html
+  --output=report.html \
+  --pdf            # also write report.pdf (rendered from the HTML)
 
 # Shopify site
 php pagespeed_scanner.php \
@@ -45,7 +46,7 @@ php pagespeed_scanner.php \
 
 ## Web UI
 
-Prefer a browser to the command line? A small, light-themed landing page is included in `web/`. Enter a **website address** (the sitemap is found automatically) or a sitemap URL, add your API key, pick your options, and it streams **live per-page progress** and shows the full report inline (plus HTML and CSV downloads) — no command line needed. A **single-page** mode is also available for scanning one URL.
+Prefer a browser to the command line? A small, light-themed landing page is included in `web/`. Enter a **website address** (the sitemap is found automatically) or a sitemap URL, add your API key, pick your options, and it streams **live per-page progress** and shows the full report inline (plus HTML, CSV, and — when the PDF engine is set up — PDF downloads) — no command line needed. A **single-page** mode is also available for scanning one URL.
 
 ```bash
 # Start the built-in PHP web server, then open http://127.0.0.1:8001
@@ -77,8 +78,27 @@ Without a key the anonymous quota is extremely limited (~2 requests/minute) and 
 | `--max-urls` | all | Cap pages tested — useful for a trial run |
 | `--output` | `pagespeed_report.html` | HTML report path |
 | `--csv` | `pagespeed_report.csv` | CSV export path |
+| `--pdf[=FILE]` | off | Also export a PDF, rendered from the HTML via headless Chromium. Bare `--pdf` derives the name from `--output` (e.g. `report.pdf`). See [PDF export](#pdf-export) |
+| `--node` | `node` | Path to the Node.js binary (PDF export only) |
+| `--runner` | `./html-to-pdf.js` | Path to the PDF helper script |
 
-## API limits & choosing worker count
+## PDF export
+
+The PDF is a pixel-faithful copy of the HTML dashboard: the same headless
+Chromium opens the finished report and prints it to PDF, expanding the
+collapsible "Optimizations Per Page" sections first so nothing is hidden.
+
+Because the scan itself is pure PHP, the PDF engine is **optional** — set it up
+once only if you want PDFs:
+
+```bash
+npm install                      # installs Playwright
+npx playwright install chromium  # one-time browser download
+```
+
+Then add `--pdf` to any scan (or use the **Download PDF** button in the web UI).
+If Node or Playwright isn't present, the tool prints a notice and still writes
+the HTML and CSV — the scan never fails because of a missing PDF engine.
 
 Free tier: **25,000 requests/day**, **240 requests/minute**. One page × one strategy = one request, so a 1,000-page site scanned on both strategies = 2,000 requests (8% of daily quota).
 
@@ -128,11 +148,13 @@ Cron example — every Monday at 07:00, with dated report files:
 
 ```
 pagespeed-bulk-scanner/
-├── pagespeed_scanner.php   # the scanner — single file, no dependencies
-├── web/                    # browser front-end (php -S 127.0.0.1:8000 -t web)
+├── pagespeed_scanner.php   # the scanner — single PHP file, no deps for scanning
+├── html-to-pdf.js          # optional PDF helper (Playwright; used by --pdf)
+├── package.json            # Node dependency for the optional PDF engine
+├── web/                    # browser front-end (php -S 127.0.0.1:8001 -t web)
 │   ├── index.php           #   form + live progress + inline report
 │   ├── scan.php            #   Server-Sent Events endpoint (reuses the scanner)
-│   └── reports/            #   generated HTML/CSV reports (git-ignored)
+│   └── reports/            #   generated HTML/CSV/PDF reports (git-ignored)
 │   #   start with: php -S 127.0.0.1:8001 -t web
 ├── README.md
 ├── LICENSE                 # MIT

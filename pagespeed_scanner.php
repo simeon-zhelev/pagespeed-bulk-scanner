@@ -39,10 +39,13 @@ function parse_args(array $argv): array {
         'workers'  => 5,
         'output'   => 'pagespeed_report.html',
         'csv'      => 'pagespeed_report.csv',
+        'pdf'      => null,                        // null = off; set by --pdf[=FILE]
+        'node'     => 'node',                      // Node.js binary (PDF export only)
+        'runner'   => __DIR__ . '/html-to-pdf.js', // PDF helper script
     ];
     $opts = getopt('', [
         'sitemap:', 'api-key:', 'strategy:', 'max-urls:',
-        'workers:', 'output:', 'csv:', 'help',
+        'workers:', 'output:', 'csv:', 'pdf::', 'node:', 'runner:', 'help',
     ]);
 
     if (isset($opts['help']) || empty($opts['sitemap'])) {
@@ -61,6 +64,12 @@ Options:
   --workers=N       Parallel API requests (default: 5, max recommended: 10)
   --output=FILE     HTML report path (default: pagespeed_report.html)
   --csv=FILE        CSV export path  (default: pagespeed_report.csv)
+  --pdf[=FILE]      Also export a PDF, rendered from the HTML report via headless
+                    Chromium. Bare --pdf derives the name from --output
+                    (pagespeed_report.pdf). Requires Node 18+ and Playwright
+                    (npm install && npx playwright install chromium).
+  --node=PATH       Node.js binary, for --pdf (default: node)
+  --runner=PATH     PDF helper script (default: ./html-to-pdf.js)
   --help            Show this help
 
 Examples:
@@ -86,6 +95,17 @@ HELP;
         fwrite(STDERR, "❌  --strategy must be mobile, desktop, or both\n");
         exit(1);
     }
+
+    // --pdf is optional-value: bare --pdf derives the path from --output
+    // (report.html → report.pdf); --pdf=FILE uses the given path.
+    if (isset($opts['pdf'])) {
+        $args['pdf'] = (is_string($opts['pdf']) && $opts['pdf'] !== '')
+            ? $opts['pdf']
+            : preg_replace('/\.html?$/i', '', $args['output']) . '.pdf';
+    } else {
+        $args['pdf'] = null;
+    }
+
     return $args;
 }
 
@@ -1210,6 +1230,63 @@ function print_summary(array $results, array $urlToGroup, array $strategies): vo
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+//  PDF export (optional — renders the finished HTML report via headless Chromium)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Why this is missing-friendly: the scan itself is pure PHP. Node/Playwright are
+ * only needed for the optional PDF, so we check on demand and return a message
+ * instead of aborting — callers warn and skip, keeping HTML/CSV intact.
+ * Returns null when PDF rendering is possible, or a human-readable reason.
+ */
+function pdf_preflight_problem(array $args): ?string {
+    $ver = trim((string)@shell_exec(escapeshellarg($args['node']) . ' --version 2>/dev/null'));
+    if ($ver === '') {
+        return "Node.js not found (looked for '{$args['node']}'). "
+             . "Install Node 18+ for PDF export, or pass --node=/path/to/node.";
+    }
+    if (!is_file($args['runner'])) {
+        return "PDF helper not found at {$args['runner']} (use --runner=PATH).";
+    }
+    $nm = dirname($args['runner']) . '/node_modules/playwright';
+    if (!is_dir($nm)) {
+        return "Node dependencies missing for PDF export. In " . dirname($args['runner']) . " run:\n"
+             . "  npm install\n"
+             . "  npx playwright install chromium";
+    }
+    return null;
+}
+
+/**
+ * Render an already-written HTML report file to PDF using the Node helper
+ * (html-to-pdf.js). Returns true on success; on failure it forwards the helper's
+ * stderr and returns false (the HTML/CSV outputs are unaffected).
+ */
+function render_pdf(string $htmlPath, string $pdfPath, string $node, string $script): bool {
+    if (!is_file($script)) {
+        fwrite(STDERR, "⚠  PDF helper not found at $script\n");
+        return false;
+    }
+    $cmd = implode(' ', array_map('escapeshellarg', [$node, $script, $htmlPath, $pdfPath]));
+    $descriptors = [1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+    $proc = proc_open($cmd, $descriptors, $pipes);
+    if (!is_resource($proc)) {
+        fwrite(STDERR, "⚠  Could not launch Node to render the PDF.\n");
+        return false;
+    }
+    stream_get_contents($pipes[1]);            // drain stdout
+    $err = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $code = proc_close($proc);
+    if ($code !== 0 || !is_file($pdfPath)) {
+        if ($err !== '') fwrite(STDERR, $err);
+        return false;
+    }
+    return true;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 //  Main
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1250,6 +1327,22 @@ function main(array $argv): void {
     // 4 — CSV
     file_put_contents($args['csv'], build_csv($results, $urlToGroup, $strategies));
     echo "✅  CSV export  → {$args['csv']}\n";
+
+    // 4b — PDF (optional, rendered from the HTML report). Never fatal: the scan
+    // itself is pure PHP, so a missing Node/Playwright only skips the PDF.
+    if ($args['pdf']) {
+        $problem = pdf_preflight_problem($args);
+        if ($problem !== null) {
+            fwrite(STDERR, "⚠  Skipping PDF export — " . str_replace("\n", "\n   ", $problem) . "\n");
+        } else {
+            echo "🖨  Rendering PDF …\n";
+            if (render_pdf($args['output'], $args['pdf'], $args['node'], $args['runner'])) {
+                echo "✅  PDF export  → {$args['pdf']}\n";
+            } else {
+                fwrite(STDERR, "⚠  PDF export failed; HTML and CSV were still written.\n");
+            }
+        }
+    }
 
     // 5 — Console summary
     print_summary($results, $urlToGroup, $strategies);

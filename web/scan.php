@@ -169,11 +169,26 @@ if (!is_dir(__DIR__ . '/reports')) @mkdir(__DIR__ . '/reports', 0777, true);
 $id      = date('Ymd-His') . '-' . substr(bin2hex(random_bytes(4)), 0, 6);
 $htmlRel = "reports/{$id}.html";
 $csvRel  = "reports/{$id}.csv";
+$pdfRel  = "reports/{$id}.pdf";
 
 file_put_contents(__DIR__ . '/' . $htmlRel,
     build_html($results, $urlToGroup, $strategies, $sitemapUrl, $generatedAt));
 file_put_contents(__DIR__ . '/' . $csvRel,
     build_csv($results, $urlToGroup, $strategies));
+
+// Render a PDF from the HTML report (best-effort; the report still works without
+// it, and the PDF engine — Node/Playwright — is optional for this tool).
+$pdfArgs = ['node' => 'node', 'runner' => dirname(__DIR__) . '/html-to-pdf.js'];
+$pdfOk = false;
+if (pdf_preflight_problem($pdfArgs) === null) {
+    sse('status', ['message' => 'Rendering the PDF…']);
+    $pdfOk = render_pdf(
+        __DIR__ . '/' . $htmlRel,
+        __DIR__ . '/' . $pdfRel,
+        $pdfArgs['node'],
+        $pdfArgs['runner']
+    );
+}
 
 // ── Summarise for the result cards ───────────────────────────────────────────
 $avg = function (string $prefix, string $cat) use ($results) {
@@ -215,5 +230,6 @@ $summary = [
 sse('done', [
     'reportUrl' => $htmlRel,
     'csvUrl'    => $csvRel,
+    'pdfUrl'    => $pdfOk ? $pdfRel : null,
     'summary'   => $summary,
 ]);

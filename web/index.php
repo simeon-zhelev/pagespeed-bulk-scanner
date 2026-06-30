@@ -392,6 +392,7 @@ function fmt(v) { return (v === null || v === undefined) ? '—' : v; }
 function renderActions(d) {
   let html =
     `<a class="btn solid" href="${d.reportUrl}" target="_blank" rel="noopener">Open full report ↗</a>`;
+  if (d.pdfUrl) html += `<a class="btn" href="${d.pdfUrl}" download>Download PDF</a>`;
   html += `<a class="btn" href="${d.csvUrl}" download>Download CSV</a>`;
   resultActions.innerHTML = html;
 }
