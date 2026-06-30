@@ -98,6 +98,19 @@ HELP;
 //  HTTP helper
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * User-Agent used when fetching sitemaps and robots.txt. A browser-like string
+ * is required because many WAFs (e.g. RunCloud's "8G" firewall) block requests
+ * whose UA looks like a bot/scraper, redirecting them to a block page — which
+ * otherwise makes perfectly valid sitemaps appear "unreachable". This is only
+ * our own fetcher's UA; PageSpeed Insights fetches pages with its own Chrome
+ * Lighthouse agent. For robots.txt purposes this presents as a generic client,
+ * so the `*` rule group applies.
+ */
+const SCANNER_USER_AGENT =
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 '
+    . '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+
 function http_get(string $url, int $timeout = 30): string {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -105,7 +118,7 @@ function http_get(string $url, int $timeout = 30): string {
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_MAXREDIRS      => 5,
         CURLOPT_TIMEOUT        => $timeout,
-        CURLOPT_USERAGENT      => 'PageSpeedBulkScanner-PHP/1.0',
+        CURLOPT_USERAGENT      => SCANNER_USER_AGENT,
         CURLOPT_SSL_VERIFYPEER => true,
         CURLOPT_ENCODING       => '',   // accept + auto-decode gzip/deflate transfer encoding
     ]);
@@ -223,9 +236,6 @@ function discover_sitemap(string $input, ?callable $log = null): ?string {
 // ─────────────────────────────────────────────────────────────────────────────
 //  robots.txt compliance (optional — used to skip disallowed URLs)
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** The User-Agent this scanner identifies as (mirrors http_get()). */
-const SCANNER_USER_AGENT = 'PageSpeedBulkScanner-PHP/1.0';
 
 /**
  * Parse a robots.txt body into rule groups keyed by (lower-cased) user-agent.
