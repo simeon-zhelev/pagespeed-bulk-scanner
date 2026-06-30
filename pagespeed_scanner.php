@@ -39,11 +39,10 @@ function parse_args(array $argv): array {
         'workers'  => 5,
         'output'   => 'pagespeed_report.html',
         'csv'      => 'pagespeed_report.csv',
-        'honour-robots' => false,
     ];
     $opts = getopt('', [
         'sitemap:', 'api-key:', 'strategy:', 'max-urls:',
-        'workers:', 'output:', 'csv:', 'honour-robots', 'help',
+        'workers:', 'output:', 'csv:', 'help',
     ]);
 
     if (isset($opts['help']) || empty($opts['sitemap'])) {
@@ -62,8 +61,6 @@ Options:
   --workers=N       Parallel API requests (default: 5, max recommended: 10)
   --output=FILE     HTML report path (default: pagespeed_report.html)
   --csv=FILE        CSV export path  (default: pagespeed_report.csv)
-  --honour-robots   Skip URLs disallowed by the site's robots.txt
-                    (default: robots.txt is ignored)
   --help            Show this help
 
 Examples:
@@ -84,8 +81,6 @@ HELP;
     $args = array_merge($defaults, $opts);
     $args['max-urls'] = $args['max-urls'] !== null ? (int)$args['max-urls'] : null;
     $args['workers']  = max(1, (int)$args['workers']);
-    // getopt() yields false for a present value-less flag; treat presence as true.
-    $args['honour-robots'] = isset($opts['honour-robots']);
 
     if (!in_array($args['strategy'], ['mobile', 'desktop', 'both'], true)) {
         fwrite(STDERR, "❌  --strategy must be mobile, desktop, or both\n");
@@ -231,149 +226,6 @@ function discover_sitemap(string $input, ?callable $log = null): ?string {
     }
 
     return null;
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  robots.txt compliance (optional — used to skip disallowed URLs)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Parse a robots.txt body into rule groups keyed by (lower-cased) user-agent.
- * Returns ['ua' => [['type' => 'allow'|'disallow', 'path' => '/foo'], …], …].
- * Consecutive `User-agent:` lines share the rule block that follows them.
- */
-function parse_robots_txt(string $body): array {
-    $groups = [];
-    $currentAgents = [];
-    $expectingAgent = false;   // are we still in a run of User-agent lines?
-
-    foreach (preg_split('/\r\n|\r|\n/', $body) as $line) {
-        $line = trim(preg_replace('/#.*$/', '', $line));   // strip comments
-        if ($line === '') continue;
-        $pos = strpos($line, ':');
-        if ($pos === false) continue;
-        $field = strtolower(trim(substr($line, 0, $pos)));
-        $value = trim(substr($line, $pos + 1));
-
-        if ($field === 'user-agent') {
-            if (!$expectingAgent) $currentAgents = [];   // a new group begins
-            $ua = strtolower($value);
-            $currentAgents[] = $ua;
-            if (!isset($groups[$ua])) $groups[$ua] = [];
-            $expectingAgent = true;
-        } elseif ($field === 'allow' || $field === 'disallow') {
-            $expectingAgent = false;
-            foreach ($currentAgents as $ua) {
-                $groups[$ua][] = ['type' => $field, 'path' => $value];
-            }
-        } else {
-            // Sitemap, Crawl-delay, etc. — ends the current User-agent run.
-            $expectingAgent = false;
-        }
-    }
-    return $groups;
-}
-
-/**
- * Pick the rule block that applies to $userAgent: the most specific matching
- * user-agent token, falling back to the `*` group, then to no rules.
- */
-function robots_rules_for_agent(array $groups, string $userAgent): array {
-    $ua = strtolower($userAgent);
-    $best = null; $bestLen = -1;
-    foreach ($groups as $agent => $rules) {
-        if ($agent === '*' || $agent === '') continue;
-        if (strpos($ua, $agent) !== false && strlen($agent) > $bestLen) {
-            $best = $agent; $bestLen = strlen($agent);
-        }
-    }
-    if ($best !== null) return $groups[$best];
-    return $groups['*'] ?? [];
-}
-
-/** Does a robots.txt path pattern (with * wildcards and a trailing $) match $path? */
-function robots_path_matches(string $pattern, string $path): bool {
-    $regex = '';
-    $len = strlen($pattern);
-    for ($i = 0; $i < $len; $i++) {
-        $c = $pattern[$i];
-        if ($c === '*') {
-            $regex .= '.*';
-        } elseif ($c === '$' && $i === $len - 1) {
-            $regex .= '$';
-        } else {
-            $regex .= preg_quote($c, '#');
-        }
-    }
-    return (bool)preg_match('#^' . $regex . '#', $path);
-}
-
-/**
- * Decide whether $url may be fetched under the given rule block.
- * Longest matching pattern wins; Allow beats Disallow on a tie — the behaviour
- * Google's crawler documents.
- */
-function robots_allows(array $rules, string $url): bool {
-    $path  = (string)parse_url($url, PHP_URL_PATH);
-    if ($path === '') $path = '/';
-    $query = parse_url($url, PHP_URL_QUERY);
-    if (is_string($query) && $query !== '') $path .= '?' . $query;
-
-    $bestAllow = -1; $bestDisallow = -1;
-    foreach ($rules as $r) {
-        $pat = $r['path'];
-        // An empty Disallow means "allow everything" and never matches.
-        if ($r['type'] === 'disallow' && $pat === '') continue;
-        if (!robots_path_matches($pat, $path)) continue;
-        $specificity = strlen($pat);
-        if ($r['type'] === 'allow') {
-            if ($specificity > $bestAllow) $bestAllow = $specificity;
-        } elseif ($specificity > $bestDisallow) {
-            $bestDisallow = $specificity;
-        }
-    }
-    if ($bestDisallow < 0) return true;      // nothing disallows this path
-    return $bestAllow >= $bestDisallow;      // Allow wins ties
-}
-
-/**
- * Drop URLs the scanner's user-agent is disallowed from fetching by each
- * origin's robots.txt. robots.txt is fetched once per origin and cached; an
- * unreachable/absent robots.txt is treated as "allow all".
- * Returns [allowedUrls, blockedCount]. $log is an optional progress callback.
- */
-function filter_urls_by_robots(array $urls, ?callable $log = null): array {
-    $rulesByOrigin = [];
-    $allowed = [];
-    $blocked = 0;
-
-    foreach ($urls as $url) {
-        $parts = parse_url($url);
-        if (empty($parts['host'])) { $allowed[] = $url; continue; }
-        $origin = ($parts['scheme'] ?? 'https') . '://' . $parts['host']
-                . (isset($parts['port']) ? ':' . $parts['port'] : '');
-
-        if (!array_key_exists($origin, $rulesByOrigin)) {
-            try {
-                $body = http_get($origin . '/robots.txt', 10);
-                $rulesByOrigin[$origin] =
-                    robots_rules_for_agent(parse_robots_txt($body), SCANNER_USER_AGENT);
-            } catch (Throwable $e) {
-                $rulesByOrigin[$origin] = [];   // no robots.txt → nothing blocked
-            }
-        }
-
-        if (robots_allows($rulesByOrigin[$origin], $url)) {
-            $allowed[] = $url;
-        } else {
-            $blocked++;
-        }
-    }
-
-    if ($blocked && $log) {
-        $log("   robots.txt disallows {$blocked} URL(s) — skipped.");
-    }
-    return [$allowed, $blocked];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1378,18 +1230,6 @@ function main(array $argv): void {
     if (!$urls) {
         fwrite(STDERR, "❌  No page URLs found. Verify the sitemap URL is accessible.\n");
         exit(1);
-    }
-
-    // 1b — Optionally drop URLs disallowed by robots.txt
-    if ($args['honour-robots']) {
-        echo "🤖 Honouring robots.txt …\n";
-        [$urls, $blocked] = filter_urls_by_robots($urls, function (string $m) { echo $m . "\n"; });
-        $urlToGroup = array_intersect_key($urlToGroup, array_flip($urls));
-        if (!$urls) {
-            fwrite(STDERR, "❌  Every URL is disallowed by robots.txt. Omit --honour-robots to scan anyway.\n");
-            exit(1);
-        }
-        echo "\n";
     }
 
     // 2 — Scan in parallel

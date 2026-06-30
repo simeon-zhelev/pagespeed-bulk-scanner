@@ -157,14 +157,6 @@
           <label for="max_urls">Max pages <span class="hint">— blank = all</span></label>
           <input type="number" id="max_urls" name="max_urls" min="1" placeholder="all (e.g. 20 for a trial)">
         </div>
-
-        <div class="field full" id="robotsField">
-          <label class="check">
-            <input type="checkbox" id="honour_robots" name="honour_robots" value="1">
-            Honour robots.txt
-            <span class="hint">— skip pages disallowed for crawlers; if unchecked, robots.txt is ignored</span>
-          </label>
-        </div>
       </div>
 
       <div class="actions">

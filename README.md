@@ -77,7 +77,6 @@ Without a key the anonymous quota is extremely limited (~2 requests/minute) and 
 | `--max-urls` | all | Cap pages tested — useful for a trial run |
 | `--output` | `pagespeed_report.html` | HTML report path |
 | `--csv` | `pagespeed_report.csv` | CSV export path |
-| `--honour-robots` | off | Skip URLs disallowed by the site's `robots.txt` (otherwise ignored). In the web UI this is the **Honour robots.txt** checkbox |
 
 ## API limits & choosing worker count
 
