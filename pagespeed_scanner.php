@@ -1115,4 +1115,8 @@ function main(array $argv): void {
     print_summary($results, $urlToGroup, $strategies);
 }
 
-main($argv);
+// Only auto-run when executed directly from the CLI. When this file is
+// included (e.g. by the web UI in index.php) we expose the functions only.
+if (PHP_SAPI === 'cli' && isset($argv[0]) && realpath($argv[0]) === realpath(__FILE__)) {
+    main($argv);
+}
