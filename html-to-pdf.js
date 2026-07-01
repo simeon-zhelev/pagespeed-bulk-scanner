@@ -6,8 +6,8 @@
  * that file in headless Chromium (Playwright) and prints it to PDF — a
  * pixel-faithful copy of the on-screen report.
  *
- * Before printing it expands every collapsible "Optimizations Per Page"
- * <details> block so the PDF is a complete document (nothing hidden behind a
+ * Before printing it expands every collapsible per-page detail row in the Full
+ * Results table so the PDF is a complete document (nothing hidden behind a
  * click).
  *
  * Usage:  node html-to-pdf.js <input.html> <output.pdf>
@@ -81,15 +81,19 @@ async function main() {
     const page = await browser.newPage();
     await page.goto('file://' + path.resolve(input), { waitUntil: 'load' });
 
-    // Expand every collapsible <details> (e.g. "Optimizations Per Page") so
+    // Reveal every collapsed per-page detail row (and any legacy <details>) so
     // nothing is hidden in print.
     await page.evaluate(() => {
       document.querySelectorAll('details').forEach(d => { d.open = true; });
+      document.querySelectorAll('tr.detail-row[hidden]')
+        .forEach(d => d.removeAttribute('hidden'));
     });
 
     await page.pdf({
       path: output,
       format: 'A4',
+      landscape: true,          // wide score/metric tables need the horizontal room
+      scale: 0.82,              // shrink slightly so all columns fit within the page
       printBackground: true,
       margin: { top: '12mm', bottom: '16mm', left: '10mm', right: '10mm' },
       displayHeaderFooter: true,

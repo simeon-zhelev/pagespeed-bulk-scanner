@@ -86,7 +86,7 @@ Without a key the anonymous quota is extremely limited (~2 requests/minute) and 
 
 The PDF is a pixel-faithful copy of the HTML dashboard: the same headless
 Chromium opens the finished report and prints it to PDF, expanding the
-collapsible "Optimizations Per Page" sections first so nothing is hidden.
+collapsible per-page detail rows first so nothing is hidden.
 
 Because the scan itself is pure PHP, the PDF engine is **optional** — set it up
 once only if you want PDFs:
@@ -119,8 +119,7 @@ Above ~25 workers you'll start hitting per-minute 429s; the built-in retry handl
 2. **By Sitemap Group** — average performance per content type
 3. **Top Optimizations** — failing performance audits ranked by pages affected, with total estimated savings
 4. **Accessibility Issues** — automated WCAG check failures with affected-pages bars and element counts
-5. **Optimizations Per Page** — collapsible per-URL issue lists
-6. **Full Results** — every page with all scores and Core Web Vitals
+5. **Full Results** — every page with all scores and Core Web Vitals; sortable columns, and each row expands to its per-URL optimization and accessibility issues
 
 ## Accessibility disclaimer
 

@@ -720,68 +720,41 @@ HTML;
 }
 
 /**
- * Per-page collapsible list of the top issues for that page.
+ * Build the per-page list of top optimization opportunities and accessibility
+ * issues. Rendered inside each page's collapsible row in the Full Results table.
+ * Returns '' when the page has nothing to show.
  */
-function per_page_optimizations(array $results, array $strategies): string {
-    $items = '';
-    foreach ($results as $r) {
-        $url   = $r['url'];
-        $short = htmlspecialchars(preg_replace('#^https?://#', '', $url));
-        $urlEsc = htmlspecialchars($url);
-
-        $body = '';
-        foreach ($strategies as $strategy) {
-            $p    = strtoupper($strategy[0]);
-            $opps = array_slice($r["{$p}_opps"] ?? [], 0, 6);
-            if (!$opps) continue;
-            $icon = $strategy === 'mobile' ? '📱' : '🖥';
-            $body .= "<div class=\"opp-strategy\">$icon " . ucfirst($strategy) . '</div><ul class="opp-list">';
-            foreach ($opps as $o) {
-                $titleEsc = htmlspecialchars($o['title']);
-                $dispEsc  = htmlspecialchars($o['display']);
-                $disp     = $dispEsc !== '' ? " <span class=\"opp-savings\">$dispEsc</span>" : '';
-                $body    .= "<li>$titleEsc$disp</li>";
-            }
-            $body .= '</ul>';
+function page_opts_body(array $r, array $strategies): string {
+    $body = '';
+    foreach ($strategies as $strategy) {
+        $p    = strtoupper($strategy[0]);
+        $opps = array_slice($r["{$p}_opps"] ?? [], 0, 6);
+        if (!$opps) continue;
+        $icon = $strategy === 'mobile' ? '📱' : '🖥';
+        $body .= "<div class=\"opp-strategy\">$icon " . ucfirst($strategy) . '</div><ul class="opp-list">';
+        foreach ($opps as $o) {
+            $titleEsc = htmlspecialchars($o['title']);
+            $dispEsc  = htmlspecialchars($o['display']);
+            $disp     = $dispEsc !== '' ? " <span class=\"opp-savings\">$dispEsc</span>" : '';
+            $body    .= "<li>$titleEsc$disp</li>";
         }
-
-        // Accessibility issues (DOM-based — shown once, from first strategy)
-        $pa = strtoupper($strategies[0][0]);
-        $a11y = array_slice($r["{$pa}_a11y_issues"] ?? [], 0, 8);
-        if ($a11y) {
-            $body .= '<div class="opp-strategy">♿ Accessibility</div><ul class="opp-list">';
-            foreach ($a11y as $iss) {
-                $titleEsc = htmlspecialchars($iss['title']);
-                $cnt = $iss['count'] > 1
-                    ? " <span class=\"opp-savings\">{$iss['count']} elements</span>" : '';
-                $body .= "<li>$titleEsc$cnt</li>";
-            }
-            $body .= '</ul>';
-        }
-        if ($body === '') continue;
-
-        $perfM = $r['M_perf'] ?? null;
-        $perfD = $r['D_perf'] ?? null;
-        $badges = '';
-        if ($perfM !== null) $badges .= ' 📱' . score_badge($perfM);
-        if ($perfD !== null) $badges .= ' 🖥' . score_badge($perfD);
-
-        $items .= <<<HTML
-
-  <details class="opp-details">
-    <summary><a href="$urlEsc" target="_blank" rel="noopener">$short</a>$badges</summary>
-    <div class="opp-body">$body</div>
-  </details>
-HTML;
+        $body .= '</ul>';
     }
 
-    if ($items === '') return '';
-    return <<<HTML
-
-<div class="section-title">📝 Optimizations Per Page</div>
-<div class="opp-container">$items
-</div>
-HTML;
+    // Accessibility issues (DOM-based — shown once, from first strategy)
+    $pa = strtoupper($strategies[0][0]);
+    $a11y = array_slice($r["{$pa}_a11y_issues"] ?? [], 0, 8);
+    if ($a11y) {
+        $body .= '<div class="opp-strategy">♿ Accessibility</div><ul class="opp-list">';
+        foreach ($a11y as $iss) {
+            $titleEsc = htmlspecialchars($iss['title']);
+            $cnt = $iss['count'] > 1
+                ? " <span class=\"opp-savings\">{$iss['count']} elements</span>" : '';
+            $body .= "<li>$titleEsc$cnt</li>";
+        }
+        $body .= '</ul>';
+    }
+    return $body;
 }
 
 /**
@@ -855,7 +828,7 @@ function score_color(?int $score): string {
 function score_badge(?int $score): string {
     $c     = score_color($score);
     $label = $score === null ? 'ERR' : (string)$score;
-    return "<span style=\"background:$c;color:#fff;padding:2px 8px;"
+    return "<span class=\"badge\" style=\"background:$c;color:#fff;padding:2px 8px;"
          . "border-radius:12px;font-weight:700;font-size:0.78rem\">$label</span>";
 }
 
@@ -914,22 +887,33 @@ function group_breakdown(array $results, array $urlToGroup, array $strategies): 
             $n     = count($gResults);
             $gEsc  = htmlspecialchars($g);
             $sCap  = ucfirst($strategy);
-            $rows .= "<tr><td class=\"gname\">$gEsc</td>"
-                   . "<td>$icon $sCap</td><td>$n</td>"
-                   . "<td><span style=\"color:$color;font-weight:700\">$a</span></td>"
-                   . "<td>$good</td><td>$warn</td><td>$poor</td></tr>";
+            $avgV  = $a === '—' ? '' : $a;
+            $rows .= "<tr>"
+                   . "<td class=\"gname\" data-col=\"0\" data-v=\"$gEsc\">$gEsc</td>"
+                   . "<td data-col=\"1\" data-v=\"$sCap\">$icon $sCap</td>"
+                   . "<td data-col=\"2\" data-v=\"$n\">$n</td>"
+                   . "<td data-col=\"3\" data-v=\"$avgV\"><span style=\"color:$color;font-weight:700\">$a</span></td>"
+                   . "<td data-col=\"4\" data-v=\"$good\">$good</td>"
+                   . "<td data-col=\"5\" data-v=\"$warn\">$warn</td>"
+                   . "<td data-col=\"6\" data-v=\"$poor\">$poor</td></tr>";
         }
     }
 
     return <<<HTML
 
 <div class="section-title">📂 By Sitemap Group</div>
+<p class="table-hint">Click a column header to sort</p>
 <div class="table-wrap" style="margin-top:10px">
-  <table>
+  <table class="sortable">
     <thead>
       <tr>
-        <th>Sitemap group</th><th>Strategy</th><th>Pages</th>
-        <th>Avg Perf</th><th>✅ Good</th><th>⚠ Warn</th><th>❌ Poor</th>
+        <th data-col="0" data-type="text">Sitemap group</th>
+        <th data-col="1" data-type="text">Strategy</th>
+        <th data-col="2" data-type="num">Pages</th>
+        <th data-col="3" data-type="num">Avg Perf</th>
+        <th data-col="4" data-type="num">✅ Good</th>
+        <th data-col="5" data-type="num">⚠ Warn</th>
+        <th data-col="6" data-type="num">❌ Poor</th>
       </tr>
     </thead>
     <tbody>$rows</tbody>
@@ -938,21 +922,51 @@ function group_breakdown(array $results, array $urlToGroup, array $strategies): 
 HTML;
 }
 
-function metric_cols(string $p, array $r): string {
+/** Parse a metric display string ("1.2 s", "350 ms", "0.05") into a numeric
+ *  sort value normalised to milliseconds (unitless values pass through). */
+function metric_sort_val(string $disp): string {
+    if (!preg_match('/([\d.]+)/', $disp, $m)) return '';
+    $n = (float)$m[1];
+    if (strpos($disp, 'ms') !== false)      { /* already ms */ }
+    elseif (strpos($disp, 's') !== false)   { $n *= 1000; }
+    return (string)$n;
+}
+
+function metric_cols(string $p, array $r, int $startCol): string {
     $err = $r["{$p}_error"] ?? null;
     if ($err) {
         $errEsc = htmlspecialchars(mb_substr($err, 0, 120));
         return "<td colspan=\"10\" style=\"color:#ef4444;font-size:0.72rem\">⚠ $errEsc</td>";
     }
     $cols = '';
-    foreach (['perf','a11y','bp','seo'] as $c) {
-        $cols .= '<td>' . score_badge($r["{$p}_{$c}"] ?? null) . '</td>';
+    $c = $startCol;
+    foreach (['perf','a11y','bp','seo'] as $cat) {
+        $v  = $r["{$p}_{$cat}"] ?? null;
+        $sv = $v === null ? '' : (string)$v;
+        $cols .= "<td data-col=\"$c\" data-v=\"$sv\">" . score_badge($v) . '</td>';
+        $c++;
     }
     foreach (['fcp','lcp','tbt','cls','speed','tti'] as $m) {
-        $val = htmlspecialchars($r["{$p}_{$m}"] ?? '—');
-        $cols .= "<td>$val</td>";
+        $raw = $r["{$p}_{$m}"] ?? '—';
+        $val = htmlspecialchars($raw);
+        $sv  = metric_sort_val((string)$raw);
+        $cols .= "<td data-col=\"$c\" data-v=\"$sv\">$val</td>";
+        $c++;
     }
     return $cols;
+}
+
+/** Column labels for one strategy's 10-metric block, tagged with body-column
+ *  indexes so the client-side sorter knows which cell to read. */
+function metric_head(int $start): string {
+    $labels = ['Perf','A11y','Best P.','SEO','FCP','LCP','TBT','CLS','Speed Idx','TTI'];
+    $h = '';
+    $c = $start;
+    foreach ($labels as $lab) {
+        $h .= "<th data-col=\"$c\" data-type=\"num\">$lab</th>";
+        $c++;
+    }
+    return $h;
 }
 
 function detail_table(array $results, array $urlToGroup, array $strategies): string {
@@ -960,17 +974,20 @@ function detail_table(array $results, array $urlToGroup, array $strategies): str
     $hasD = in_array('desktop', $strategies, true);
     $hasGroups = count(array_unique(array_values($urlToGroup))) > 1;
 
-    $scoreHeads  = '<th>Perf</th><th>A11y</th><th>Best P.</th><th>SEO</th>';
-    $metricHeads = '<th>FCP</th><th>LCP</th><th>TBT</th><th>CLS</th><th>Speed Idx</th><th>TTI</th>';
-    $groupHead   = $scoreHeads . $metricHeads;
+    // Body column layout: # (0), URL (1), [Group (2)], then Mobile / Desktop blocks.
+    $base    = 2 + ($hasGroups ? 1 : 0);
+    $mStart  = $base;
+    $dStart  = $base + ($hasM ? 10 : 0);
+    $total   = $base + ($hasM ? 10 : 0) + ($hasD ? 10 : 0);
 
-    $groupCol = $hasGroups ? '<th>Group</th>' : '';
-    $thead = "<tr><th>#</th><th>URL</th>$groupCol";
+    $groupCol = $hasGroups ? '<th data-col="2" data-type="text">Group</th>' : '';
+    $thead = "<tr><th data-col=\"0\" data-type=\"num\">#</th>"
+           . "<th data-col=\"1\" data-type=\"text\">URL</th>$groupCol";
     if ($hasM) $thead .= '<th colspan="10" style="background:#1e40af;color:#fff">📱 Mobile</th>';
     if ($hasD) $thead .= '<th colspan="10" style="background:#065f46;color:#fff">🖥 Desktop</th>';
     $thead .= '</tr><tr><th></th><th></th>' . ($hasGroups ? '<th></th>' : '');
-    if ($hasM) $thead .= $groupHead;
-    if ($hasD) $thead .= $groupHead;
+    if ($hasM) $thead .= metric_head($mStart);
+    if ($hasD) $thead .= metric_head($dStart);
     $thead .= '</tr>';
 
     $rows = '';
@@ -981,19 +998,32 @@ function detail_table(array $results, array $urlToGroup, array $strategies): str
         $urlEsc = htmlspecialchars($url);
         $short = htmlspecialchars(preg_replace('#^https?://#', '', $url));
         $group = htmlspecialchars($urlToGroup[$url] ?? '');
-        $gc    = $hasGroups ? "<td class=\"gname\">$group</td>" : '';
-        $mCols = $hasM ? metric_cols('M', $r) : '';
-        $dCols = $hasD ? metric_cols('D', $r) : '';
-        $rows .= "<tr><td class=\"num\">$i</td>"
-               . "<td class=\"url-cell\"><a href=\"$urlEsc\" target=\"_blank\" rel=\"noopener\">$short</a></td>"
+        $gc    = $hasGroups ? "<td class=\"gname\" data-col=\"2\" data-v=\"$group\">$group</td>" : '';
+        $mCols = $hasM ? metric_cols('M', $r, $mStart) : '';
+        $dCols = $hasD ? metric_cols('D', $r, $dStart) : '';
+
+        $detail = page_opts_body($r, $strategies);
+        $hasDetail = $detail !== '';
+        $caret   = $hasDetail ? '<span class="caret">▸</span>' : '';
+        $trClass = $hasDetail ? 'page-row has-detail' : 'page-row';
+
+        $rows .= "<tr class=\"$trClass\">"
+               . "<td class=\"num\" data-col=\"0\" data-v=\"$i\">$i</td>"
+               . "<td class=\"url-cell\" data-col=\"1\" data-v=\"$short\">$caret"
+               . "<a href=\"$urlEsc\" target=\"_blank\" rel=\"noopener\">$short</a></td>"
                . "$gc$mCols$dCols</tr>";
+        if ($hasDetail) {
+            $rows .= "<tr class=\"detail-row\" hidden>"
+                   . "<td colspan=\"$total\"><div class=\"opp-body\">$detail</div></td></tr>";
+        }
     }
 
     return <<<HTML
 
 <div class="section-title">📋 Full Results</div>
+<p class="table-hint">Click a column header to sort · click a row to see its optimizations</p>
 <div class="table-wrap">
-  <table>
+  <table class="sortable">
     <thead>$thead</thead>
     <tbody>$rows</tbody>
   </table>
@@ -1013,7 +1043,6 @@ function build_html(array $results, array $urlToGroup, array $strategies,
     $groupHtml  = group_breakdown($results, $urlToGroup, $strategies);
     $optHtml    = optimization_summary($results, $strategies);
     $a11yHtml   = a11y_summary($results, $strategies);
-    $perPageHtml= per_page_optimizations($results, $strategies);
     $detailHtml = detail_table($results, $urlToGroup, $strategies);
     $sitemapEsc = htmlspecialchars($sitemapUrl);
     $count      = count($results);
@@ -1055,6 +1084,19 @@ function build_html(array $results, array $urlToGroup, array $strategies,
   td.gname { text-align: left; font-size: 0.72rem; color: #64748b; white-space: nowrap; }
   td.num   { color: #94a3b8; width: 32px; }
   tr:hover td { background: #f1f5f9; }
+  .table-hint { font-size: 0.72rem; color: #94a3b8; margin: 0 0 6px; }
+  /* Sortable headers */
+  th[data-col] { cursor: pointer; user-select: none; }
+  th[data-col]::after { content: ' \\2195'; opacity: .35; font-size: 0.85em; }
+  th[data-col][data-dir="asc"]::after  { content: ' \\2191'; opacity: 1; }
+  th[data-col][data-dir="desc"]::after { content: ' \\2193'; opacity: 1; }
+  /* Expandable Full Results rows */
+  tr.has-detail { cursor: pointer; }
+  .caret { display: inline-block; margin-right: 5px; color: #94a3b8;
+           font-size: 0.7rem; transition: transform .15s; }
+  tr.has-detail.open .caret { transform: rotate(90deg); }
+  tr.detail-row > td { text-align: left; background: #f8fafc; padding: 12px 16px; }
+  tr.detail-row:hover > td { background: #f8fafc; }
   .legend { margin-top: 20px; font-size: 0.72rem; color: #64748b; }
   .dot    { display:inline-block; width:9px; height:9px; border-radius:50%;
             margin-right:4px; vertical-align:middle; }
@@ -1066,20 +1108,28 @@ function build_html(array $results, array $urlToGroup, array $strategies,
   .a11yfill { background: #a855f7; }
   .pgtext { position: absolute; inset: 0; display: flex; align-items: center;
             justify-content: center; font-size: 0.7rem; color: #1e293b; }
-  .opp-container { display: flex; flex-direction: column; gap: 6px; }
-  .opp-details   { background: #ffffff; border: 1px solid #e2e8f0;
-                   border-radius: 8px; padding: 10px 14px; }
-  .opp-details summary { cursor: pointer; font-size: 0.82rem; }
-  .opp-details summary a { color: #2563eb; text-decoration: none; }
-  .opp-details summary a:hover { text-decoration: underline; }
-  .opp-body     { margin-top: 8px; }
+  .opp-body     { margin-top: 4px; }
   .opp-strategy { font-size: 0.72rem; font-weight: 700; color: #64748b;
                   margin-top: 8px; text-transform: uppercase; letter-spacing: .05em; }
   .opp-list     { margin: 4px 0 0; padding-left: 18px; font-size: 0.78rem; }
   .opp-list li  { margin: 3px 0; }
   .opp-savings  { color: #d97706; font-size: 0.72rem; }
-  /* PDF export: drop the grey page background so the print is clean white */
-  @media print { body { background: #ffffff; } }
+  /* PDF export: drop the grey page background so the print is clean white,
+     and reveal every collapsed per-page detail so nothing is hidden. */
+  @media print {
+    body { background: #ffffff; padding: 0; }
+    tr.detail-row, tr.detail-row[hidden] { display: table-row !important; }
+    .caret, .table-hint, th[data-col]::after { display: none; }
+    /* Densify tables so every score/metric column fits on the (landscape) page
+       instead of being clipped off the right edge. */
+    .table-wrap { overflow: visible; border: none; }
+    table { font-size: 0.6rem; }
+    th, td { padding: 2px 4px; letter-spacing: 0; }
+    th { white-space: normal; }
+    td.gname { white-space: normal; }
+    td.url-cell { max-width: 150px; }
+    .badge { padding: 1px 4px !important; font-size: 0.6rem !important; }
+  }
 </style>
 </head>
 <body>
@@ -1094,7 +1144,6 @@ $summary
 $groupHtml
 $optHtml
 $a11yHtml
-$perPageHtml
 $detailHtml
 
 <div class="legend">
@@ -1102,6 +1151,84 @@ $detailHtml
   <span class="dot" style="background:#f59e0b"></span> Needs improvement (50–89) &nbsp;
   <span class="dot" style="background:#ef4444"></span> Poor (0–49)
 </div>
+<script>
+(function () {
+  // ── Expand/collapse per-page detail rows in Full Results ──────────────────
+  document.querySelectorAll('tr.has-detail').forEach(function (row) {
+    row.addEventListener('click', function (e) {
+      if (e.target.closest('a')) return;            // let links open normally
+      var d = row.nextElementSibling;
+      if (!d || !d.classList.contains('detail-row')) return;
+      var show = d.hasAttribute('hidden');
+      if (show) d.removeAttribute('hidden'); else d.setAttribute('hidden', '');
+      row.classList.toggle('open', show);
+    });
+  });
+
+  // ── Click-to-sort tables ──────────────────────────────────────────────────
+  function cellValue(row, col) {
+    var td = row.querySelector('td[data-col="' + col + '"]');
+    if (!td) return '';
+    var v = td.getAttribute('data-v');
+    return v !== null ? v : td.textContent.trim();
+  }
+
+  function compare(a, b, type, dir) {
+    if (type === 'num') {
+      var na = parseFloat(a), nb = parseFloat(b);
+      var aN = isNaN(na), bN = isNaN(nb);
+      if (aN && bN) return 0;
+      if (aN) return 1;                             // blanks always last
+      if (bN) return -1;
+      return dir === 'asc' ? na - nb : nb - na;
+    }
+    a = (a || '').toLowerCase();
+    b = (b || '').toLowerCase();
+    if (a < b) return dir === 'asc' ? -1 : 1;
+    if (a > b) return dir === 'asc' ? 1 : -1;
+    return 0;
+  }
+
+  function sortTable(table, th) {
+    var col  = th.getAttribute('data-col');
+    var type = th.getAttribute('data-type') || 'text';
+    var dir  = th.getAttribute('data-dir') === 'asc' ? 'desc' : 'asc';
+    table.querySelectorAll('th[data-col]').forEach(function (h) {
+      h.removeAttribute('data-dir');
+    });
+    th.setAttribute('data-dir', dir);
+
+    var tbody = table.tBodies[0];
+    // Group each main row with any trailing detail row so they move together.
+    var groups = [], cur = null;
+    Array.prototype.forEach.call(tbody.rows, function (tr) {
+      if (tr.classList.contains('detail-row')) {
+        if (cur) cur.extra.push(tr);
+      } else {
+        cur = { main: tr, extra: [] };
+        groups.push(cur);
+      }
+    });
+
+    groups.sort(function (g1, g2) {
+      return compare(cellValue(g1.main, col), cellValue(g2.main, col), type, dir);
+    });
+
+    var frag = document.createDocumentFragment();
+    groups.forEach(function (g) {
+      frag.appendChild(g.main);
+      g.extra.forEach(function (e) { frag.appendChild(e); });
+    });
+    tbody.appendChild(frag);
+  }
+
+  document.querySelectorAll('table.sortable').forEach(function (table) {
+    table.querySelectorAll('th[data-col]').forEach(function (th) {
+      th.addEventListener('click', function () { sortTable(table, th); });
+    });
+  });
+})();
+</script>
 </body>
 </html>
 HTML;
