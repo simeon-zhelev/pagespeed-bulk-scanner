@@ -1008,7 +1008,7 @@ function a11y_summary(array $results, array $strategies): string {
     }
     if (!$agg) {
         return '<div class="section-title">♿ Accessibility Issues</div>'
-             . '<p style="font-size:0.85rem;color:#22c55e">'
+             . '<p style="font-size:0.85rem;color:#2e9e5b">'
              . 'No automated accessibility failures detected. '
              . 'Note: manual testing is still required for full WCAG/ADA coverage.</p>';
     }
@@ -1041,7 +1041,7 @@ function a11y_summary(array $results, array $strategies): string {
     <tbody>$rows</tbody>
   </table>
 </div>
-<p style="font-size:0.72rem;color:#64748b;margin-top:8px">
+<p style="font-size:0.72rem;color:#888888;margin-top:8px">
   ⚠ Automated checks catch only ~30–40% of WCAG issues. Full ADA compliance also
   requires manual keyboard, screen-reader, and focus-order testing.
 </p>
@@ -1049,10 +1049,10 @@ HTML;
 }
 
 function score_color(?int $score): string {
-    if ($score === null) return '#9ca3af';
-    if ($score >= 90)    return '#22c55e';
-    if ($score >= 50)    return '#f59e0b';
-    return '#ef4444';
+    if ($score === null) return '#9a958c';
+    if ($score >= 90)    return '#2e9e5b';
+    if ($score >= 50)    return '#d99a2b';
+    return '#cf4a3a';
 }
 
 function score_badge(?int $score): string {
@@ -1166,7 +1166,7 @@ function metric_cols(string $p, array $r, int $startCol): string {
     $err = $r["{$p}_error"] ?? null;
     if ($err) {
         $errEsc = htmlspecialchars(mb_substr($err, 0, 120));
-        return "<td colspan=\"10\" style=\"color:#ef4444;font-size:0.72rem\">⚠ $errEsc</td>";
+        return "<td colspan=\"10\" style=\"color:#cf4a3a;font-size:0.72rem\">⚠ $errEsc</td>";
     }
     $cols = '';
     $c = $startCol;
@@ -1213,8 +1213,8 @@ function detail_table(array $results, array $urlToGroup, array $strategies): str
     $groupCol = $hasGroups ? '<th data-col="2" data-type="text">Group</th>' : '';
     $thead = "<tr><th data-col=\"0\" data-type=\"num\">#</th>"
            . "<th data-col=\"1\" data-type=\"text\">URL</th>$groupCol";
-    if ($hasM) $thead .= '<th colspan="10" style="background:#1e40af;color:#fff">📱 Mobile</th>';
-    if ($hasD) $thead .= '<th colspan="10" style="background:#065f46;color:#fff">🖥 Desktop</th>';
+    if ($hasM) $thead .= '<th colspan="10" style="background:#2560a8;color:#fff">📱 Mobile</th>';
+    if ($hasD) $thead .= '<th colspan="10" style="background:#24824a;color:#fff">🖥 Desktop</th>';
     $thead .= '</tr><tr><th></th><th></th>' . ($hasGroups ? '<th></th>' : '');
     if ($hasM) $thead .= metric_head($mStart);
     if ($hasD) $thead .= metric_head($dStart);
@@ -1286,35 +1286,35 @@ function build_html(array $results, array $urlToGroup, array $strategies,
 <title>PageSpeed Report — $generatedAt</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
-  body  { font-family: system-ui, -apple-system, sans-serif;
-          background: #f1f5f9; color: #1e293b; margin: 0; padding: 24px 28px; }
-  h1    { font-size: 1.6rem; margin-bottom: 4px; color: #0f172a; }
-  .meta { font-size: 0.8rem; color: #64748b; margin-bottom: 28px; }
-  .section-title { font-size: 0.8rem; font-weight: 700; color: #64748b;
+  body  { font-family: Helvetica, Arial, system-ui, sans-serif;
+          background: #f0ede7; color: #1a1a1a; margin: 0; padding: 24px 28px; }
+  h1    { font-size: 1.6rem; margin-bottom: 4px; color: #1a1a1a; }
+  .meta { font-size: 0.8rem; color: #888888; margin-bottom: 28px; }
+  .section-title { font-size: 0.8rem; font-weight: 700; color: #888888;
                    text-transform: uppercase; letter-spacing: .1em;
                    margin: 32px 0 10px; }
   .cards { display: flex; flex-wrap: wrap; gap: 12px; }
-  .card  { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 10px;
+  .card  { background: #ffffff; border: 1px solid #e3ded6; border-radius: 8px;
            padding: 16px 22px; min-width: 148px; flex: 1;
            box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
-  .card-label { font-size: 0.72rem; color: #64748b; text-transform: uppercase;
+  .card-label { font-size: 0.72rem; color: #888888; text-transform: uppercase;
                 letter-spacing: .06em; }
   .card-score { font-size: 2.4rem; font-weight: 700; line-height: 1.1; margin: 4px 0; }
-  .card-sub   { font-size: 0.7rem; color: #94a3b8; }
-  .table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 10px;
+  .card-sub   { font-size: 0.7rem; color: #9a958c; }
+  .table-wrap { overflow-x: auto; border: 1px solid #e3ded6; border-radius: 8px;
                 background: #ffffff; margin-top: 4px; }
   table  { width: 100%; border-collapse: collapse; font-size: 0.77rem; }
-  th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid #e2e8f0; }
-  th     { background: #f8fafc; color: #475569; font-weight: 600;
+  th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid #e3ded6; }
+  th     { background: #f7f5f1; color: #777777; font-weight: 600;
            text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
   td.url-cell { text-align: left; max-width: 280px; overflow: hidden;
                 text-overflow: ellipsis; white-space: nowrap; }
-  td.url-cell a { color: #2563eb; text-decoration: none; }
+  td.url-cell a { color: #2a78d6; text-decoration: none; }
   td.url-cell a:hover { text-decoration: underline; }
-  td.gname { text-align: left; font-size: 0.72rem; color: #64748b; white-space: nowrap; }
-  td.num   { color: #94a3b8; width: 32px; }
-  tr:hover td { background: #f1f5f9; }
-  .table-hint { font-size: 0.72rem; color: #94a3b8; margin: 0 0 6px; }
+  td.gname { text-align: left; font-size: 0.72rem; color: #888888; white-space: nowrap; }
+  td.num   { color: #9a958c; width: 32px; }
+  tr:hover td { background: #f0ede7; }
+  .table-hint { font-size: 0.72rem; color: #9a958c; margin: 0 0 6px; }
   /* Sortable headers */
   th[data-col] { cursor: pointer; user-select: none; }
   th[data-col]::after { content: ' \\2195'; opacity: .35; font-size: 0.85em; }
@@ -1322,28 +1322,28 @@ function build_html(array $results, array $urlToGroup, array $strategies,
   th[data-col][data-dir="desc"]::after { content: ' \\2193'; opacity: 1; }
   /* Expandable Full Results rows */
   tr.has-detail { cursor: pointer; }
-  .caret { display: inline-block; margin-right: 5px; color: #94a3b8;
+  .caret { display: inline-block; margin-right: 5px; color: #9a958c;
            font-size: 0.7rem; transition: transform .15s; }
   tr.has-detail.open .caret { transform: rotate(90deg); }
-  tr.detail-row > td { text-align: left; background: #f8fafc; padding: 12px 16px; }
-  tr.detail-row:hover > td { background: #f8fafc; }
-  .legend { margin-top: 20px; font-size: 0.72rem; color: #64748b; }
+  tr.detail-row > td { text-align: left; background: #f7f5f1; padding: 12px 16px; }
+  tr.detail-row:hover > td { background: #f7f5f1; }
+  .legend { margin-top: 20px; font-size: 0.72rem; color: #888888; }
   .dot    { display:inline-block; width:9px; height:9px; border-radius:50%;
             margin-right:4px; vertical-align:middle; }
   /* Optimizations */
   td.opp-title { text-align: left; }
-  .pgbar  { position: relative; background: #e2e8f0; border-radius: 6px;
+  .pgbar  { position: relative; background: #e3ded6; border-radius: 6px;
             height: 18px; min-width: 160px; overflow: hidden; }
-  .pgfill { background: #3b82f6; height: 100%; border-radius: 6px; opacity: .55; }
+  .pgfill { background: #2a78d6; height: 100%; border-radius: 6px; opacity: .55; }
   .a11yfill { background: #a855f7; }
   .pgtext { position: absolute; inset: 0; display: flex; align-items: center;
-            justify-content: center; font-size: 0.7rem; color: #1e293b; }
+            justify-content: center; font-size: 0.7rem; color: #1a1a1a; }
   .opp-body     { margin-top: 4px; }
-  .opp-strategy { font-size: 0.72rem; font-weight: 700; color: #64748b;
+  .opp-strategy { font-size: 0.72rem; font-weight: 700; color: #888888;
                   margin-top: 8px; text-transform: uppercase; letter-spacing: .05em; }
   .opp-list     { margin: 4px 0 0; padding-left: 18px; font-size: 0.78rem; }
   .opp-list li  { margin: 3px 0; }
-  .opp-savings  { color: #d97706; font-size: 0.72rem; }
+  .opp-savings  { color: #d99a2b; font-size: 0.72rem; }
   /* PDF export: drop the grey page background so the print is clean white,
      and reveal every collapsed per-page detail so nothing is hidden. */
   @media print {
@@ -1377,9 +1377,9 @@ $a11yHtml
 $detailHtml
 
 <div class="legend">
-  <span class="dot" style="background:#22c55e"></span> Good (90–100) &nbsp;
-  <span class="dot" style="background:#f59e0b"></span> Needs improvement (50–89) &nbsp;
-  <span class="dot" style="background:#ef4444"></span> Poor (0–49)
+  <span class="dot" style="background:#2e9e5b"></span> Good (90–100) &nbsp;
+  <span class="dot" style="background:#d99a2b"></span> Needs improvement (50–89) &nbsp;
+  <span class="dot" style="background:#cf4a3a"></span> Poor (0–49)
 </div>
 <script>
 (function () {
