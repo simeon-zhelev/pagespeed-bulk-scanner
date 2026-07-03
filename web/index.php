@@ -1,4 +1,4 @@
-<?php /* PageSpeed Bulk Scanner — web frontend. Run with: php -S 127.0.0.1:8001 -t web */ ?>
+<?php /* PageSpeed Bulk Scanner — web frontend. Run with: php -S 127.0.0.1:8082 -t web */ ?>
 <!doctype html>
 <html lang="en">
 <head>

@@ -49,8 +49,8 @@ php pagespeed_scanner.php \
 Prefer a browser to the command line? A small, light-themed landing page is included in `web/`. Enter a **website address** (the sitemap is found automatically) or a sitemap URL, add your API key, pick your options, and it streams **live per-page progress** and shows the full report inline (plus HTML, CSV, and — when the PDF engine is set up — PDF downloads) — no command line needed. A **single-page** mode is also available for scanning one URL.
 
 ```bash
-# Start the built-in PHP web server, then open http://127.0.0.1:8001
-php -S 127.0.0.1:8001 -t web
+# Start the built-in PHP web server, then open http://127.0.0.1:8082
+php -S 127.0.0.1:8082 -t web
 ```
 
 It reuses the exact same engine as the CLI — `pagespeed_scanner.php` — so results are identical. Generated reports are written to `web/reports/` (git-ignored).
@@ -150,11 +150,11 @@ pagespeed-bulk-scanner/
 ├── pagespeed_scanner.php   # the scanner — single PHP file, no deps for scanning
 ├── html-to-pdf.js          # optional PDF helper (Playwright; used by --pdf)
 ├── package.json            # Node dependency for the optional PDF engine
-├── web/                    # browser front-end (php -S 127.0.0.1:8001 -t web)
+├── web/                    # browser front-end (php -S 127.0.0.1:8082 -t web)
 │   ├── index.php           #   form + live progress + inline report
 │   ├── scan.php            #   Server-Sent Events endpoint (reuses the scanner)
 │   └── reports/            #   generated HTML/CSV/PDF reports (git-ignored)
-│   #   start with: php -S 127.0.0.1:8001 -t web
+│   #   start with: php -S 127.0.0.1:8082 -t web
 ├── README.md
 ├── LICENSE                 # MIT
 └── .gitignore
