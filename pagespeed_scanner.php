@@ -42,10 +42,15 @@ function parse_args(array $argv): array {
         'pdf'      => null,                        // null = off; set by --pdf[=FILE]
         'node'     => 'node',                      // Node.js binary (PDF export only)
         'runner'   => __DIR__ . '/html-to-pdf.js', // PDF helper script
+        'cache-dir' => null,                       // PSI response cache directory (off by default)
+        'cache-ttl' => 86400,                      // cache freshness in seconds (24h)
+        'engine'    => 'psi',                      // psi (API) | local (Lighthouse in local Chromium)
+        'lh-runner' => __DIR__ . '/lighthouse-runner.js',
     ];
     $opts = getopt('', [
         'sitemap:', 'api-key:', 'strategy:', 'max-urls:',
-        'workers:', 'output:', 'csv:', 'pdf::', 'node:', 'runner:', 'help',
+        'workers:', 'output:', 'csv:', 'pdf::', 'node:', 'runner:',
+        'cache-dir:', 'cache-ttl:', 'engine:', 'lh-runner:', 'help',
     ]);
 
     if (isset($opts['help']) || empty($opts['sitemap'])) {
@@ -70,6 +75,15 @@ Options:
                     (npm install && npx playwright install chromium).
   --node=PATH       Node.js binary, for --pdf (default: node)
   --runner=PATH     PDF helper script (default: ./html-to-pdf.js)
+  --cache-dir=DIR   Cache successful PSI responses per URL+strategy in DIR and
+                    reuse them while fresh — repeat scans don't spend quota
+  --cache-ttl=SECS  Cache freshness window (default: 86400 = 24h)
+  --engine=E        psi (default) — Google PageSpeed Insights API, or
+                    local — Lighthouse in a locally launched headless Chromium:
+                    no API key/quota, works on private/staging sites, but runs
+                    are sequential and numbers may differ from the PSI ones.
+                    Needs Node 18+ (npm install && npx playwright install chromium).
+  --lh-runner=PATH  Local Lighthouse helper (default: ./lighthouse-runner.js)
   --help            Show this help
 
 Examples:
@@ -90,6 +104,13 @@ HELP;
     $args = array_merge($defaults, $opts);
     $args['max-urls'] = $args['max-urls'] !== null ? (int)$args['max-urls'] : null;
     $args['workers']  = max(1, (int)$args['workers']);
+    $args['cache-dir'] = isset($args['cache-dir']) && $args['cache-dir'] !== '' ? (string)$args['cache-dir'] : null;
+    $args['cache-ttl'] = max(0, (int)$args['cache-ttl']);
+
+    if (!in_array($args['engine'], ['psi', 'local'], true)) {
+        fwrite(STDERR, "❌  --engine must be psi or local\n");
+        exit(1);
+    }
 
     if (!in_array($args['strategy'], ['mobile', 'desktop', 'both'], true)) {
         fwrite(STDERR, "❌  --strategy must be mobile, desktop, or both\n");
@@ -473,16 +494,53 @@ function make_psi_handle(string $requestUrl) {
     return $ch;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  PSI response cache (optional, --cache-dir)
+//  One file per url+strategy with the raw PSI JSON. Only clean HTTP-200
+//  responses are cached, so transient failures never stick.
+// ─────────────────────────────────────────────────────────────────────────────
+
+function psi_cache_path(string $dir, string $url, string $strategy, string $engine = 'psi'): string {
+    return rtrim($dir, '/') . '/' . md5($url . '|' . $strategy . '|' . $engine) . '.json';
+}
+
+function psi_cache_get(?string $dir, int $ttl, string $url, string $strategy, string $engine = 'psi'): ?string {
+    if (!$dir || $ttl <= 0) return null;
+    $f = psi_cache_path($dir, $url, $strategy, $engine);
+    if (!is_file($f) || filemtime($f) < time() - $ttl) return null;
+    $body = @file_get_contents($f);
+    return ($body === false || $body === '') ? null : $body;
+}
+
+function psi_cache_put(?string $dir, string $url, string $strategy, string $body, string $engine = 'psi'): void {
+    if (!$dir) return;
+    if (!is_dir($dir) && !@mkdir($dir, 0775, true)) return;
+    @file_put_contents(psi_cache_path($dir, $url, $strategy, $engine), $body);
+}
+
 /**
  * Run all (url × strategy) jobs through a rolling curl_multi pool.
  * Returns: map  pageUrl => result-row (merged across strategies).
  */
 function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
-                  ?callable $onEvent = null): array {
-    // Build the full job list: one HTTP request per url+strategy pair
+                  ?callable $onEvent = null,
+                  ?string $cacheDir = null, int $cacheTtl = 86400): array {
+    // Build the full job list: one HTTP request per url+strategy pair.
+    // Fresh cache hits skip the network entirely (--cache-dir).
     $jobs = [];
+    $cachedJobs = [];
     foreach ($urls as $url) {
         foreach ($strategies as $strategy) {
+            $cachedBody = psi_cache_get($cacheDir, $cacheTtl, $url, $strategy);
+            if ($cachedBody !== null) {
+                $cachedJobs[] = [
+                    'url'      => $url,
+                    'strategy' => $strategy,
+                    'prefix'   => strtoupper($strategy[0]),
+                    'body'     => $cachedBody,
+                ];
+                continue;
+            }
             $jobs[] = [
                 'url'      => $url,
                 'strategy' => $strategy,
@@ -498,7 +556,7 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
         $results[$url] = ['url' => $url];
     }
 
-    $totalJobs = count($jobs);
+    $totalJobs = count($jobs) + count($cachedJobs);
     $doneJobs  = 0;
     if (!$onEvent) {
         echo "⚡  Scanning " . count($urls) . " URLs × " . count($strategies)
@@ -511,6 +569,32 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
             'workers'    => $workers,
             'strategies' => $strategies,
         ]);
+    }
+
+    // Replay cache hits first — instant results, zero quota
+    foreach ($cachedJobs as $cj) {
+        $doneJobs++;
+        $parsed = parse_psi_response($cj['body'], $cj['prefix']);
+        $results[$cj['url']] = array_merge($results[$cj['url']], $parsed);
+        if ($onEvent) {
+            $onEvent([
+                'phase'    => 'job',
+                'done'     => $doneJobs,
+                'total'    => $totalJobs,
+                'url'      => $cj['url'],
+                'strategy' => $cj['strategy'],
+                'ok'       => ($parsed["{$cj['prefix']}_error"] ?? null) === null,
+                'cached'   => true,
+                'perf'     => $parsed["{$cj['prefix']}_perf"] ?? null,
+                'a11y'     => $parsed["{$cj['prefix']}_a11y"] ?? null,
+                'seo'      => $parsed["{$cj['prefix']}_seo"]  ?? null,
+                'bp'       => $parsed["{$cj['prefix']}_bp"]   ?? null,
+                'error'    => $parsed["{$cj['prefix']}_error"] ?? null,
+            ]);
+        } else {
+            $score = $parsed["{$cj['prefix']}_perf"] ?? '—';
+            echo "  [$doneJobs/$totalJobs] ⚡ [{$cj['strategy']}] perf=$score  {$cj['url']}  (cached)\n";
+        }
     }
 
     $mh = curl_multi_init();
@@ -577,6 +661,9 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
             } else {
                 $parsed = parse_psi_response($body, $prefix);
                 $results[$url] = array_merge($results[$url], $parsed);
+                if ($code === 200 && ($parsed["{$prefix}_error"] ?? null) === null) {
+                    psi_cache_put($cacheDir, $url, $job['strategy'], $body);
+                }
                 if (!$onEvent) {
                     $score = $parsed["{$prefix}_perf"] ?? '—';
                     $scoreStr = $score === null ? 'ERR' : $score;
@@ -609,6 +696,149 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
     } while ($running || $active || $queue);
 
     curl_multi_close($mh);
+    return $results;
+}
+
+/**
+ * Local Lighthouse engine (--engine=local): audits every url×strategy with
+ * lighthouse-runner.js in a locally launched headless Chromium. No API key,
+ * no quota, reaches private/staging sites. Sequential per strategy — parallel
+ * Lighthouse runs contend for CPU and skew TBT/LCP.
+ * Emits the exact result-row shape scan_all() produces.
+ */
+function scan_local(array $urls, array $strategies, array $args,
+                    ?callable $onEvent = null,
+                    ?string $cacheDir = null, int $cacheTtl = 86400): array {
+    $results = [];
+    foreach ($urls as $url) {
+        $results[$url] = ['url' => $url];
+    }
+
+    $totalJobs = count($urls) * count($strategies);
+    $doneJobs  = 0;
+
+    if (!$onEvent) {
+        echo "⚡  Local Lighthouse: " . count($urls) . " URLs × " . count($strategies)
+           . " strategies = $totalJobs runs, sequential …\n\n";
+    } else {
+        $onEvent(['phase' => 'scan-start', 'total' => $totalJobs,
+                  'urls' => count($urls), 'workers' => 1, 'strategies' => $strategies]);
+    }
+
+    $emit = function (string $url, string $strategy, string $prefix, array $parsed, bool $cached = false)
+            use (&$doneJobs, $totalJobs, $onEvent): void {
+        $doneJobs++;
+        $err = $parsed["{$prefix}_error"] ?? null;
+        if ($onEvent) {
+            $onEvent([
+                'phase' => 'job', 'done' => $doneJobs, 'total' => $totalJobs,
+                'url' => $url, 'strategy' => $strategy, 'ok' => $err === null,
+                'cached' => $cached,
+                'perf' => $parsed["{$prefix}_perf"] ?? null,
+                'a11y' => $parsed["{$prefix}_a11y"] ?? null,
+                'seo'  => $parsed["{$prefix}_seo"]  ?? null,
+                'bp'   => $parsed["{$prefix}_bp"]   ?? null,
+                'error' => $err,
+            ]);
+        } else {
+            $score = $parsed["{$prefix}_perf"] ?? null;
+            $tag   = $cached ? '  (cached)' : '';
+            echo $err === null
+                ? "  [$doneJobs/$totalJobs] ✓ [$strategy] perf=" . ($score ?? '—') . "  $url$tag\n"
+                : "  [$doneJobs/$totalJobs] ✗ [$strategy] $url — $err\n";
+        }
+    };
+
+    $errorRow = function (string $prefix, string $msg): array {
+        $row = [];
+        foreach (['perf','a11y','bp','seo','fcp','lcp','tbt','cls','speed','tti'] as $k) {
+            $row["{$prefix}_{$k}"] = null;
+        }
+        $row["{$prefix}_error"] = $msg;
+        return $row;
+    };
+
+    foreach ($strategies as $strategy) {
+        $prefix = strtoupper($strategy[0]);
+
+        // Cache replay first (shared format with the PSI engine, separate key space)
+        $pending = [];
+        foreach ($urls as $url) {
+            $body = psi_cache_get($cacheDir, $cacheTtl, $url, $strategy, 'local');
+            if ($body !== null) {
+                $parsed = parse_psi_response($body, $prefix);
+                $results[$url] = array_merge($results[$url], $parsed);
+                $emit($url, $strategy, $prefix, $parsed, cached: true);
+            } else {
+                $pending[] = $url;
+            }
+        }
+        if (!$pending) {
+            continue;
+        }
+
+        if (!is_file($args['lh-runner'])) {
+            foreach ($pending as $url) {
+                $parsed = $errorRow($prefix, 'lighthouse-runner.js not found: ' . $args['lh-runner']);
+                $results[$url] = array_merge($results[$url], $parsed);
+                $emit($url, $strategy, $prefix, $parsed);
+            }
+            continue;
+        }
+
+        $cmd = escapeshellarg($args['node']) . ' ' . escapeshellarg($args['lh-runner'])
+             . ' --strategy=' . escapeshellarg($strategy);
+        $proc = proc_open($cmd, [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes);
+
+        if (!is_resource($proc)) {
+            foreach ($pending as $url) {
+                $parsed = $errorRow($prefix, 'Could not start Node runner');
+                $results[$url] = array_merge($results[$url], $parsed);
+                $emit($url, $strategy, $prefix, $parsed);
+            }
+            continue;
+        }
+
+        fwrite($pipes[0], implode("\n", $pending) . "\n");
+        fclose($pipes[0]);
+
+        $seen = [];
+        while (($line = fgets($pipes[1])) !== false) {
+            $row = json_decode(trim($line), true);
+            if (!is_array($row) || empty($row['url'])) {
+                continue;
+            }
+            $url = $row['url'];
+            $seen[$url] = true;
+
+            if (isset($row['lighthouseResult'])) {
+                $body   = json_encode(['lighthouseResult' => $row['lighthouseResult']]);
+                $parsed = parse_psi_response($body, $prefix);
+                if (($parsed["{$prefix}_error"] ?? null) === null) {
+                    psi_cache_put($cacheDir, $url, $strategy, $body, 'local');
+                }
+            } else {
+                $parsed = $errorRow($prefix, (string)($row['error'] ?? 'Lighthouse failed'));
+            }
+            $results[$url] = array_merge($results[$url], $parsed);
+            $emit($url, $strategy, $prefix, $parsed);
+        }
+
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exit = proc_close($proc);
+
+        // Anything the runner never reported (crash mid-run) becomes an error row
+        foreach ($pending as $url) {
+            if (isset($seen[$url])) continue;
+            $msg = trim((string)$stderr) !== '' ? trim($stderr) : "Runner exited ($exit) before auditing this URL";
+            $parsed = $errorRow($prefix, $msg);
+            $results[$url] = array_merge($results[$url], $parsed);
+            $emit($url, $strategy, $prefix, $parsed);
+        }
+    }
+
     return $results;
 }
 
@@ -1428,10 +1658,11 @@ function main(array $argv): void {
         ? ['mobile', 'desktop']
         : [$args['strategy']];
 
-    if (!$args['api-key']) {
+    if (!$args['api-key'] && $args['engine'] === 'psi') {
         echo "⚠  No --api-key provided. Anonymous quota is ~2 req/min and may fail\n"
            . "   on large sitemaps. Get a free key:\n"
-           . "   https://console.cloud.google.com/apis/library/pagespeedonline.googleapis.com\n\n";
+           . "   https://console.cloud.google.com/apis/library/pagespeedonline.googleapis.com\n"
+           . "   (or use --engine=local to run Lighthouse without the API)\n\n";
     }
 
     // 1 — Collect URLs
@@ -1442,7 +1673,10 @@ function main(array $argv): void {
     }
 
     // 2 — Scan in parallel
-    $resultsMap = scan_all($urls, $strategies, $args['api-key'], $args['workers']);
+    $resultsMap = $args['engine'] === 'local'
+        ? scan_local($urls, $strategies, $args, null, $args['cache-dir'], $args['cache-ttl'])
+        : scan_all($urls, $strategies, $args['api-key'], $args['workers'],
+                   null, $args['cache-dir'], $args['cache-ttl']);
 
     // Preserve sitemap order
     $results = [];
