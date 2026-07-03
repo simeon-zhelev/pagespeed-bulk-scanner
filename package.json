@@ -1,7 +1,7 @@
 {
   "name": "pagespeed-bulk-scanner",
   "version": "1.0.0",
-  "description": "Optional PDF-export engine for the PageSpeed Bulk Scanner. Driven by pagespeed_scanner.php; renders the finished HTML report to PDF via headless Chromium (Playwright). The scan itself is pure PHP and needs none of this.",
+  "description": "Optional Node engines for the PageSpeed Bulk Scanner: PDF export (html-to-pdf.js) and the local Lighthouse engine (lighthouse-runner.js, --engine=local). Driven by pagespeed_scanner.php; the default PSI scan is pure PHP and needs none of this.",
   "license": "MIT",
   "private": true,
   "bin": {
@@ -15,6 +15,8 @@
     "node": ">=18"
   },
   "dependencies": {
+    "chrome-launcher": "^1.1.2",
+    "lighthouse": "^12.0.0",
     "playwright": "^1.48.0"
   }
 }
