@@ -934,7 +934,7 @@ function optimization_summary(array $results, array $strategies): string {
         $sCap = ucfirst($strategy);
         $html .= <<<HTML
 
-<div class="section-title">🔧 Top Optimizations — $icon $sCap</div>
+<div class="section-title">Top Optimizations — $sCap</div>
 <div class="table-wrap" style="margin-top:10px">
   <table>
     <thead>
@@ -961,7 +961,7 @@ function page_opts_body(array $r, array $strategies): string {
         $opps = array_slice($r["{$p}_opps"] ?? [], 0, 6);
         if (!$opps) continue;
         $icon = $strategy === 'mobile' ? '📱' : '🖥';
-        $body .= "<div class=\"opp-strategy\">$icon " . ucfirst($strategy) . '</div><ul class="opp-list">';
+        $body .= "<div class=\"opp-strategy\">" . ucfirst($strategy) . '</div><ul class="opp-list">';
         foreach ($opps as $o) {
             $titleEsc = htmlspecialchars($o['title']);
             $dispEsc  = htmlspecialchars($o['display']);
@@ -1007,7 +1007,7 @@ function a11y_summary(array $results, array $strategies): string {
         }
     }
     if (!$agg) {
-        return '<div class="section-title">♿ Accessibility Issues</div>'
+        return '<div class="section-title">Accessibility Issues</div>'
              . '<p style="font-size:0.85rem;color:#2e9e5b">'
              . 'No automated accessibility failures detected. '
              . 'Note: manual testing is still required for full WCAG/ADA coverage.</p>';
@@ -1031,7 +1031,7 @@ function a11y_summary(array $results, array $strategies): string {
 
     return <<<HTML
 
-<div class="section-title">♿ Accessibility Issues (WCAG, automated checks)</div>
+<div class="section-title">Accessibility Issues (WCAG, automated checks)</div>
 <div class="table-wrap" style="margin-top:10px">
   <table>
     <thead>
@@ -1120,7 +1120,7 @@ function group_breakdown(array $results, array $urlToGroup, array $strategies): 
             $avgV  = $a === '—' ? '' : $a;
             $rows .= "<tr>"
                    . "<td class=\"gname\" data-col=\"0\" data-v=\"$gEsc\">$gEsc</td>"
-                   . "<td data-col=\"1\" data-v=\"$sCap\">$icon $sCap</td>"
+                   . "<td data-col=\"1\" data-v=\"$sCap\">$sCap</td>"
                    . "<td data-col=\"2\" data-v=\"$n\">$n</td>"
                    . "<td data-col=\"3\" data-v=\"$avgV\"><span style=\"color:$color;font-weight:700\">$a</span></td>"
                    . "<td data-col=\"4\" data-v=\"$good\">$good</td>"
@@ -1131,7 +1131,7 @@ function group_breakdown(array $results, array $urlToGroup, array $strategies): 
 
     return <<<HTML
 
-<div class="section-title">📂 By Sitemap Group</div>
+<div class="section-title">By Sitemap Group</div>
 <p class="table-hint">Click a column header to sort</p>
 <div class="table-wrap" style="margin-top:10px">
   <table class="sortable">
@@ -1250,7 +1250,7 @@ function detail_table(array $results, array $urlToGroup, array $strategies): str
 
     return <<<HTML
 
-<div class="section-title">📋 Full Results</div>
+<div class="section-title">Full Results</div>
 <p class="table-hint">Click a column header to sort · click a row to see its optimizations</p>
 <div class="table-wrap">
   <table class="sortable">
@@ -1284,37 +1284,61 @@ function build_html(array $results, array $urlToGroup, array $strategies,
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PageSpeed Report — $generatedAt</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
+  /* ── Website Health Check report theme (teal) ── */
+  :root {
+    --ink: #0F1E33; --body: #33415C; --muted: #64748B; --soft: #94A3B8;
+    --line: #E6EAF1; --line-strong: #C9D4E5; --bg: #ffffff; --bg-soft: #F5F7FA;
+    --accent: #0D8A7E; --accent-tint: #E6F4F2; --accent-line: #BFE3DE;
+    --good: #1F9D5B; --warn: #E3A11F; --bad: #D64541;
+  }
   *, *::before, *::after { box-sizing: border-box; }
-  body  { font-family: Helvetica, Arial, system-ui, sans-serif;
-          background: #f0ede7; color: #1a1a1a; margin: 0; padding: 24px 28px; }
-  h1    { font-size: 1.6rem; margin-bottom: 4px; color: #1a1a1a; }
-  .meta { font-size: 0.8rem; color: #888888; margin-bottom: 28px; }
-  .section-title { font-size: 0.8rem; font-weight: 700; color: #888888;
-                   text-transform: uppercase; letter-spacing: .1em;
+  body  { font-family: 'IBM Plex Sans', system-ui, Helvetica, Arial, sans-serif;
+          background: var(--bg-soft); color: var(--body); margin: 0; padding: 0 28px 40px;
+          line-height: 1.55; }
+  .brandbar { display: flex; align-items: center; gap: 14px; padding: 18px 0 16px;
+              margin-bottom: 24px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .brandbar .logo { width: 30px; height: 30px; border-radius: 50%; flex: none;
+    background: conic-gradient(var(--good) 0 76%, var(--line) 76% 100%);
+    display: grid; place-items: center; }
+  .brandbar .logo::before { content: ''; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--bg-soft); }
+  .brandbar .brandname { font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+    font-size: 17px; color: var(--ink); }
+  .brandbar .brandctx { color: var(--soft); font-size: 13px; }
+  .brandbar .sp { flex: 1; }
+  h1    { font-family: 'Space Grotesk', sans-serif; font-size: 1.6rem; margin: 6px 0 4px; color: var(--ink); }
+  .meta { font-size: 0.8rem; color: var(--muted); margin-bottom: 28px; }
+  .meta strong { color: var(--ink); }
+  .section-title { font-family: 'Space Grotesk', sans-serif; font-size: 0.8rem; font-weight: 700;
+                   color: var(--muted); text-transform: uppercase; letter-spacing: .1em;
                    margin: 32px 0 10px; }
   .cards { display: flex; flex-wrap: wrap; gap: 12px; }
-  .card  { background: #ffffff; border: 1px solid #e3ded6; border-radius: 8px;
+  .card  { background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
            padding: 16px 22px; min-width: 148px; flex: 1;
            box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
-  .card-label { font-size: 0.72rem; color: #888888; text-transform: uppercase;
+  .card-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
                 letter-spacing: .06em; }
-  .card-score { font-size: 2.4rem; font-weight: 700; line-height: 1.1; margin: 4px 0; }
-  .card-sub   { font-size: 0.7rem; color: #9a958c; }
-  .table-wrap { overflow-x: auto; border: 1px solid #e3ded6; border-radius: 8px;
-                background: #ffffff; margin-top: 4px; }
-  table  { width: 100%; border-collapse: collapse; font-size: 0.77rem; }
-  th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid #e3ded6; }
-  th     { background: #f7f5f1; color: #777777; font-weight: 600;
+  .card-score { font-family: 'Space Grotesk', sans-serif; font-size: 2.4rem; font-weight: 700;
+                line-height: 1.1; margin: 4px 0; color: var(--ink); }
+  .card-sub   { font-size: 0.7rem; color: var(--soft); }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px;
+                background: var(--bg); margin-top: 4px; }
+  table  { width: 100%; border-collapse: collapse; font-size: 0.77rem; color: var(--body); }
+  th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--line); }
+  th     { background: var(--bg-soft); color: var(--muted); font-weight: 600;
            text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
   td.url-cell { text-align: left; max-width: 280px; overflow: hidden;
                 text-overflow: ellipsis; white-space: nowrap; }
-  td.url-cell a { color: #2a78d6; text-decoration: none; }
+  td.url-cell a { color: var(--accent); text-decoration: none; }
   td.url-cell a:hover { text-decoration: underline; }
-  td.gname { text-align: left; font-size: 0.72rem; color: #888888; white-space: nowrap; }
-  td.num   { color: #9a958c; width: 32px; }
-  tr:hover td { background: #f0ede7; }
-  .table-hint { font-size: 0.72rem; color: #9a958c; margin: 0 0 6px; }
+  td.gname { text-align: left; font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
+  td.num   { color: var(--soft); width: 32px; }
+  tr:hover td { background: var(--accent-tint); }
+  .table-hint { font-size: 0.72rem; color: var(--soft); margin: 0 0 6px; }
   /* Sortable headers */
   th[data-col] { cursor: pointer; user-select: none; }
   th[data-col]::after { content: ' \\2195'; opacity: .35; font-size: 0.85em; }
@@ -1322,28 +1346,28 @@ function build_html(array $results, array $urlToGroup, array $strategies,
   th[data-col][data-dir="desc"]::after { content: ' \\2193'; opacity: 1; }
   /* Expandable Full Results rows */
   tr.has-detail { cursor: pointer; }
-  .caret { display: inline-block; margin-right: 5px; color: #9a958c;
+  .caret { display: inline-block; margin-right: 5px; color: var(--accent);
            font-size: 0.7rem; transition: transform .15s; }
   tr.has-detail.open .caret { transform: rotate(90deg); }
-  tr.detail-row > td { text-align: left; background: #f7f5f1; padding: 12px 16px; }
-  tr.detail-row:hover > td { background: #f7f5f1; }
-  .legend { margin-top: 20px; font-size: 0.72rem; color: #888888; }
+  tr.detail-row > td { text-align: left; background: var(--bg-soft); padding: 12px 16px; }
+  tr.detail-row:hover > td { background: var(--bg-soft); }
+  .legend { margin-top: 20px; font-size: 0.72rem; color: var(--muted); }
   .dot    { display:inline-block; width:9px; height:9px; border-radius:50%;
             margin-right:4px; vertical-align:middle; }
   /* Optimizations */
   td.opp-title { text-align: left; }
-  .pgbar  { position: relative; background: #e3ded6; border-radius: 6px;
-            height: 18px; min-width: 160px; overflow: hidden; }
-  .pgfill { background: #2a78d6; height: 100%; border-radius: 6px; opacity: .55; }
+  .pgbar  { position: relative; background: var(--bg-soft); border: 1px solid var(--line);
+            border-radius: 6px; height: 18px; min-width: 160px; overflow: hidden; }
+  .pgfill { background: var(--accent); height: 100%; border-radius: 6px; opacity: .7; }
   .a11yfill { background: #a855f7; }
   .pgtext { position: absolute; inset: 0; display: flex; align-items: center;
-            justify-content: center; font-size: 0.7rem; color: #1a1a1a; }
+            justify-content: center; font-size: 0.7rem; color: var(--ink); }
   .opp-body     { margin-top: 4px; }
-  .opp-strategy { font-size: 0.72rem; font-weight: 700; color: #888888;
+  .opp-strategy { font-size: 0.72rem; font-weight: 700; color: var(--muted);
                   margin-top: 8px; text-transform: uppercase; letter-spacing: .05em; }
   .opp-list     { margin: 4px 0 0; padding-left: 18px; font-size: 0.78rem; }
   .opp-list li  { margin: 3px 0; }
-  .opp-savings  { color: #d99a2b; font-size: 0.72rem; }
+  .opp-savings  { color: var(--warn); font-size: 0.72rem; }
   /* PDF export: drop the grey page background so the print is clean white,
      and reveal every collapsed per-page detail so nothing is hidden. */
   @media print {
@@ -1363,7 +1387,13 @@ function build_html(array $results, array $urlToGroup, array $strategies,
 </style>
 </head>
 <body>
-<h1>🚀 PageSpeed Bulk Report</h1>
+<header class="brandbar">
+  <span class="logo"></span>
+  <span class="brandname">Website Health Check</span>
+  <span class="sp"></span>
+  <span class="brandctx">PageSpeed report · powered by 2create</span>
+</header>
+<h1>PageSpeed Bulk Report</h1>
 <div class="meta">
   Sitemap: <strong>$sitemapEsc</strong> &nbsp;|&nbsp;
   Pages tested: <strong>$count</strong> &nbsp;|&nbsp;
