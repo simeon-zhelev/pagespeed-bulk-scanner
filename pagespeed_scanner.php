@@ -1485,7 +1485,8 @@ function build_csv(array $results, array $urlToGroup, array $strategies): string
     }
 
     $fh = fopen('php://temp', 'r+');
-    fputcsv($fh, $fields);
+    // Explicit escape: PHP 8.4 deprecates omitting it (default is being removed).
+    fputcsv($fh, $fields, escape: '\\');
     foreach ($results as $r) {
         $row = [$r['url'], $urlToGroup[$r['url']] ?? ''];
         foreach ($prefixes as [$p, ]) {
@@ -1507,7 +1508,7 @@ function build_csv(array $results, array $urlToGroup, array $strategies): string
                     : $i['title'];
             }, $a11y));
         }
-        fputcsv($fh, $row);
+        fputcsv($fh, $row, escape: '\\');
     }
     rewind($fh);
     $csv = stream_get_contents($fh);
