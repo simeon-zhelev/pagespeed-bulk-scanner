@@ -161,7 +161,6 @@ function http_get(string $url, int $timeout = 30): string {
     $body = curl_exec($ch);
     $err  = curl_error($ch);
     $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
 
     if ($body === false) {
         throw new RuntimeException("cURL error: $err");
@@ -629,7 +628,6 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
             $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $err  = curl_error($ch);
             curl_multi_remove_handle($mh, $ch);
-            curl_close($ch);
 
             $url    = $job['url'];
             $prefix = $job['prefix'];
