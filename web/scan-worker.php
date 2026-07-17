@@ -6,8 +6,9 @@
  *
  *   php scan-worker.php <job-id>
  *
- * Reads  jobs/<id>/params.json  (written by scan.php), runs the scan, and
- * appends progress events to  jobs/<id>/events.ndjson  — one JSON object per
+ * Reads var/jobs/<id>/params.json (written by scan.php outside the public web
+ * root), runs the scan, and appends progress events to
+ * var/jobs/<id>/events.ndjson — one JSON object per
  * line: {"event": "...", "data": {...}}. scan.php?action=stream tails that
  * file and relays the lines to the browser as Server-Sent Events.
  *
@@ -39,7 +40,7 @@ if (!preg_match('/^[A-Za-z0-9-]{1,64}$/', $jobId)) {
     fwrite(STDERR, "Usage: php scan-worker.php <job-id>\n");
     exit(1);
 }
-$jobDir     = __DIR__ . '/jobs/' . $jobId;
+$jobDir     = __DIR__ . '/../var/jobs/' . $jobId;
 $eventsFile = $jobDir . '/events.ndjson';
 $paramsFile = $jobDir . '/params.json';
 
@@ -77,6 +78,8 @@ $p = json_decode((string)file_get_contents($paramsFile), true);
 if (!is_array($p)) {
     fail('Could not read the job parameters.');
 }
+// The API key is no longer needed on disk once this process has loaded it.
+@unlink($paramsFile);
 
 $mode       = ($p['mode'] ?? 'sitemap') === 'url' ? 'url' : 'sitemap';
 $target     = (string)($p['target'] ?? '');
@@ -86,6 +89,7 @@ $strategies = $strategy === 'both' ? ['mobile', 'desktop'] : [$strategy];
 $workers    = max(1, min(25, (int)($p['workers'] ?? 15)));
 $maxUrls    = isset($p['max_urls']) && $p['max_urls'] !== null ? max(1, (int)$p['max_urls']) : null;
 $rateLimit  = max(0, (int)($p['rate_limit'] ?? 240));
+$forceCrawl = !empty($p['crawl']);
 
 if (!$apiKey) {
     emit('status', ['message' => 'No API key — anonymous quota is small and may rate-limit.']);
@@ -98,36 +102,44 @@ if ($mode === 'url') {
     $urls       = [$target];
     $urlToGroup = [$target => 'Page'];
 } else {
-    // Whole-site mode: resolve a sitemap (direct URL or auto-discover), crawl it.
-    if (!looks_like_sitemap($target)) {
-        emit('status', ['message' => 'Looking for the sitemap…']);
-    }
+    // Whole-site mode: use a sitemap when possible, then fall back to following
+    // same-site HTML links when no usable sitemap is available.
+    $sitemapUrl = $target;
+    $urls = [];
+    $urlToGroup = [];
     try {
-        ob_start();
-        $resolved = discover_sitemap($target);
-        ob_end_clean();
-    } catch (Throwable $e) {
-        if (ob_get_level() > 0) ob_end_clean();
-        $resolved = null;
-    }
-    if ($resolved === null) {
-        fail("Could not find a sitemap for '{$target}'. "
-           . 'Try entering the sitemap URL directly (e.g. https://example.com/sitemap_index.xml).');
-    }
-    $sitemapUrl = $resolved;
+        if (!$forceCrawl) {
+            if (!looks_like_sitemap($target)) {
+                emit('status', ['message' => 'Looking for the sitemap…']);
+            }
+            ob_start();
+            $resolved = discover_sitemap($target);
+            ob_end_clean();
+            if ($resolved !== null) {
+                $sitemapUrl = $resolved;
+                emit('status', ['message' => 'Crawling the sitemap…']);
+                ob_start();
+                [$urls, $urlToGroup] = collect_urls($resolved, $maxUrls);
+                ob_end_clean();
+            }
+        }
 
-    try {
-        emit('status', ['message' => 'Crawling the sitemap…']);
-        // collect_urls() prints crawl progress to stdout; keep it out of the log.
-        ob_start();
-        [$urls, $urlToGroup] = collect_urls($sitemapUrl, $maxUrls);
-        ob_end_clean();
+        if (!$urls) {
+            $sitemapUrl = $target;
+            emit('status', ['message' => $forceCrawl
+                ? 'Crawling the site to discover pages…'
+                : 'No sitemap found — crawling the site to discover pages…']);
+            ob_start();
+            [$urls, $urlToGroup] = crawl_site($target, $maxUrls, 0);
+            ob_end_clean();
+        }
     } catch (Throwable $e) {
         if (ob_get_level() > 0) ob_end_clean();
-        fail('Could not read the sitemap: ' . $e->getMessage());
+        fail('Could not discover pages to scan: ' . $e->getMessage());
     }
     if (!$urls) {
-        fail('No page URLs found. Verify the sitemap URL is reachable and valid.');
+        fail('No page URLs found. The site may be unreachable, block automated '
+           . 'requests, or have no crawlable links. Try a sitemap URL directly.');
     }
 }
 

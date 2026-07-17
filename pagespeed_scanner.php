@@ -3,8 +3,9 @@
 /**
  * WordPress PageSpeed Bulk Scanner (PHP version)
  * ------------------------------------------------
- * Crawls a Yoast-generated sitemap_index.xml (or any plain sitemap.xml),
- * calls the PageSpeed Insights API for every page URL in parallel, and writes:
+ * Discovers pages from an XML sitemap (or a same-site HTML crawl when no
+ * sitemap is available), calls PageSpeed Insights for every URL in parallel,
+ * and writes:
  *   - a self-contained HTML dashboard  (pagespeed_report.html)
  *   - a CSV export                     (pagespeed_report.csv)
  *
@@ -13,7 +14,7 @@
  *   - <image:loc> entries are excluded
  *   - Trailing XML comments are ignored
  *
- * Requirements: PHP 7.4+ with curl and simplexml extensions (standard).
+ * Requirements: PHP 8.2+ with curl, simplexml and dom extensions (standard).
  *
  * Usage:
  *   php pagespeed_scanner.php \
@@ -25,6 +26,19 @@
  *       --output=report.html \
  *       --csv=report.csv
  */
+
+if (PHP_VERSION_ID < 80200) {
+    $message = 'PageSpeed Bulk Scanner requires PHP 8.2 or newer. Current version: '
+             . PHP_VERSION . "\n";
+    if (PHP_SAPI === 'cli') {
+        fwrite(STDERR, $message);
+    } else {
+        http_response_code(500);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo $message;
+    }
+    exit(1);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  CLI arguments
@@ -47,11 +61,14 @@ function parse_args(array $argv): array {
         'engine'    => 'psi',                      // psi (API) | local (Lighthouse in local Chromium)
         'lh-runner' => __DIR__ . '/lighthouse-runner.js',
         'rate-limit' => 240,                       // shared per-key API budget, requests/minute (0 = off)
+        'crawl'       => false,                     // force an HTML crawl (skip sitemap discovery)
+        'crawl-depth' => 0,                         // link depth for the crawl (0 = unlimited)
     ];
     $opts = getopt('', [
         'sitemap:', 'api-key:', 'strategy:', 'max-urls:',
         'workers:', 'output:', 'csv:', 'pdf::', 'node:', 'runner:',
-        'cache-dir:', 'cache-ttl:', 'engine:', 'lh-runner:', 'rate-limit:', 'help',
+        'cache-dir:', 'cache-ttl:', 'engine:', 'lh-runner:', 'rate-limit:',
+        'crawl', 'crawl-depth:', 'help',
     ]);
 
     if (isset($opts['help']) || empty($opts['sitemap'])) {
@@ -63,7 +80,13 @@ Usage:
   php pagespeed_scanner.php --sitemap=URL [options]
 
 Options:
-  --sitemap=URL     URL of sitemap_index.xml or any child sitemap (required)
+  --sitemap=URL     Sitemap URL or plain website URL (required). For a site URL,
+                    the sitemap is auto-discovered; when none is available the
+                    scanner falls back to crawling same-site links.
+  --crawl           Skip sitemap discovery and crawl same-site HTML links from
+                    --sitemap directly. Useful when a sitemap is incomplete.
+  --crawl-depth=N   Maximum link depth for crawling (default: 0 = unlimited,
+                    bounded by --max-urls or a 2000-page safety cap)
   --api-key=KEY     Google PageSpeed Insights API key (strongly recommended)
   --strategy=S      mobile | desktop | both   (default: both)
   --max-urls=N      Cap total URLs scanned
@@ -113,6 +136,8 @@ HELP;
     $args['cache-dir'] = isset($args['cache-dir']) && $args['cache-dir'] !== '' ? (string)$args['cache-dir'] : null;
     $args['cache-ttl'] = max(0, (int)$args['cache-ttl']);
     $args['rate-limit'] = max(0, (int)$args['rate-limit']);
+    $args['crawl'] = isset($opts['crawl']);
+    $args['crawl-depth'] = max(0, (int)($opts['crawl-depth'] ?? 0));
 
     if (!in_array($args['engine'], ['psi', 'local'], true)) {
         fwrite(STDERR, "❌  --engine must be psi or local\n");
@@ -394,6 +419,180 @@ function collect_urls(string $sitemapUrl, ?int $maxUrls = null): array {
     if ($maxUrls !== null) {
         $urls = array_slice($urls, 0, $maxUrls);
     }
+    return [$urls, $urlToGroup];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  HTML crawler (fallback for sites without an XML sitemap)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Safety cap on pages discovered by crawling when --max-urls is not set. */
+const CRAWL_DEFAULT_CAP = 2000;
+
+/** File extensions that are never HTML pages — skip these links while crawling. */
+const CRAWL_SKIP_EXT = [
+    'jpg','jpeg','png','gif','svg','webp','ico','bmp','tif','tiff','avif',
+    'css','js','mjs','json','xml','rss','atom','txt','csv','pdf','zip','gz',
+    'tar','rar','7z','dmg','exe','mp4','webm','mov','avi','mkv','mp3','wav',
+    'ogg','flac','woff','woff2','ttf','otf','eot','map','wasm','apk','pkg',
+];
+
+/** Group a crawled page by the first segment of its path. */
+function crawl_group_name(string $url): string {
+    $path = trim((string)parse_url($url, PHP_URL_PATH), '/');
+    if ($path === '') return 'Home';
+    $segment = preg_replace('/\.[a-z0-9]+$/i', '', explode('/', $path)[0]);
+    $segment = ucwords(str_replace(['-', '_'], ' ', $segment));
+    return $segment !== '' ? $segment : 'Pages';
+}
+
+/**
+ * Resolve a possibly-relative link against a page URL. Fragments and
+ * non-navigation schemes are discarded; path dot-segments are normalised.
+ */
+function resolve_url(string $base, string $relative): ?string {
+    $relative = trim($relative);
+    if ($relative === '' || $relative[0] === '#') return null;
+    if (preg_match('~^(mailto|tel|javascript|data|ftp|sms|file):~i', $relative)) return null;
+    if (($fragment = strpos($relative, '#')) !== false) {
+        $relative = substr($relative, 0, $fragment);
+    }
+    if ($relative === '') return null;
+    if (preg_match('#^https?://#i', $relative)) return $relative;
+
+    $baseParts = parse_url($base);
+    if ($baseParts === false || empty($baseParts['host'])) return null;
+    $scheme = $baseParts['scheme'] ?? 'https';
+    if (strncmp($relative, '//', 2) === 0) return $scheme . ':' . $relative;
+
+    $origin = $scheme . '://' . $baseParts['host']
+            . (isset($baseParts['port']) ? ':' . $baseParts['port'] : '');
+    if ($relative[0] === '?') {
+        $basePath = $baseParts['path'] ?? '/';
+        $path = ($basePath === '' ? '/' : $basePath) . $relative;
+    } elseif ($relative[0] === '/') {
+        $path = $relative;
+    } else {
+        $basePath = $baseParts['path'] ?? '/';
+        $dir = substr($basePath, 0, strrpos($basePath, '/') + 1);
+        $path = ($dir === '' ? '/' : $dir) . $relative;
+    }
+
+    $query = '';
+    if (($queryPos = strpos($path, '?')) !== false) {
+        $query = substr($path, $queryPos);
+        $path = substr($path, 0, $queryPos);
+    }
+    $segments = [];
+    foreach (explode('/', $path) as $segment) {
+        if ($segment === '' || $segment === '.') continue;
+        if ($segment === '..') {
+            array_pop($segments);
+            continue;
+        }
+        $segments[] = $segment;
+    }
+    $normalized = '/' . implode('/', $segments);
+    if (substr($path, -1) === '/' && $normalized !== '/') $normalized .= '/';
+    return $origin . $normalized . $query;
+}
+
+/**
+ * Whether two parsed HTTP(S) URLs belong to the same crawl boundary. Normal
+ * default-port transitions between HTTP and HTTPS are allowed, while links to
+ * a different hostname or a non-default service port remain out of scope.
+ */
+function same_crawl_site(array $root, array $candidate): bool {
+    $rootScheme = strtolower($root['scheme'] ?? 'https');
+    $candidateScheme = strtolower($candidate['scheme'] ?? $rootScheme);
+    if (!in_array($rootScheme, ['http', 'https'], true)
+        || !in_array($candidateScheme, ['http', 'https'], true)) {
+        return false;
+    }
+    if (strtolower($root['host'] ?? '') !== strtolower($candidate['host'] ?? '')) {
+        return false;
+    }
+
+    $rootDefault = $rootScheme === 'https' ? 443 : 80;
+    $candidateDefault = $candidateScheme === 'https' ? 443 : 80;
+    $rootPort = isset($root['port']) ? (int)$root['port'] : $rootDefault;
+    $candidatePort = isset($candidate['port']) ? (int)$candidate['port'] : $candidateDefault;
+
+    return $rootPort === $candidatePort
+        || ($rootPort === $rootDefault && $candidatePort === $candidateDefault);
+}
+
+/**
+ * Breadth-first crawl of HTML pages, following same-site <a href> links from
+ * the supplied start URL. Returns the same [urls, urlToGroup] shape as the
+ * sitemap collector. $maxDepth=0 means unlimited depth within the page cap.
+ */
+function crawl_site(string $startUrl, ?int $maxUrls = null, int $maxDepth = 0,
+                    ?callable $log = null): array {
+    $say = function (string $message) use ($log) {
+        $log ? $log($message) : print($message . "\n");
+    };
+
+    $startUrl = trim($startUrl);
+    if (!preg_match('#^https?://#i', $startUrl)) {
+        $startUrl = 'https://' . ltrim($startUrl, '/');
+    }
+    $startParts = parse_url($startUrl);
+    if ($startParts === false || empty($startParts['host'])) return [[], []];
+
+    $scheme = strtolower($startParts['scheme'] ?? 'https');
+    $host = strtolower($startParts['host']);
+    $origin = $scheme . '://' . $host
+            . (isset($startParts['port']) ? ':' . $startParts['port'] : '');
+    $cap = $maxUrls ?? CRAWL_DEFAULT_CAP;
+
+    $urls = [];
+    $urlToGroup = [];
+    $visited = [$startUrl => true];
+    $queue = [[$startUrl, 0]];
+
+    $say("\n🕸  Crawling {$origin} for HTML pages (cap {$cap}) …");
+
+    while ($queue && count($urls) < $cap) {
+        [$url, $depth] = array_shift($queue);
+        try {
+            $html = http_get($url, 20);
+        } catch (Throwable $e) {
+            $say("    ⚠  Skipped {$url}: {$e->getMessage()}");
+            continue;
+        }
+
+        // Avoid adding XML, JSON, downloads, and block pages to the scan list.
+        if (!preg_match('/<(!doctype|html|head|body|a\b)/i', $html)) continue;
+
+        $urls[] = $url;
+        $urlToGroup[$url] = crawl_group_name($url);
+        $say('  ↳ [' . count($urls) . "] {$url}");
+
+        if (($maxDepth > 0 && $depth >= $maxDepth) || count($urls) >= $cap) continue;
+
+        libxml_use_internal_errors(true);
+        $doc = new DOMDocument();
+        $doc->loadHTML($html);
+        libxml_clear_errors();
+        foreach ($doc->getElementsByTagName('a') as $anchor) {
+            $absolute = resolve_url($url, $anchor->getAttribute('href'));
+            if ($absolute === null || isset($visited[$absolute])) continue;
+
+            $parts = parse_url($absolute);
+            if ($parts === false || empty($parts['host'])) continue;
+            if (!same_crawl_site($startParts, $parts)) continue;
+
+            $extension = strtolower(pathinfo($parts['path'] ?? '', PATHINFO_EXTENSION));
+            if ($extension !== '' && in_array($extension, CRAWL_SKIP_EXT, true)) continue;
+
+            $visited[$absolute] = true;
+            $queue[] = [$absolute, $depth + 1];
+        }
+    }
+
+    $groupCount = count(array_unique(array_values($urlToGroup)));
+    $say('   Discovered ' . count($urls) . " page URL(s) across {$groupCount} section(s) by crawling\n");
     return [$urls, $urlToGroup];
 }
 
@@ -1354,6 +1553,22 @@ function metric_head(int $start): string {
     return $h;
 }
 
+/**
+ * Whether a page has at least one Lighthouse category score below the existing
+ * "Good" threshold. Used to keep the PDF focused on actionable pages while
+ * the interactive HTML report continues to expose the complete result set.
+ */
+function page_needs_improvement(array $result, array $strategies): bool {
+    foreach ($strategies as $strategy) {
+        $p = strtoupper($strategy[0]);
+        foreach (['perf', 'a11y', 'bp', 'seo'] as $category) {
+            $score = $result["{$p}_{$category}"] ?? null;
+            if (is_int($score) && $score < 90) return true;
+        }
+    }
+    return false;
+}
+
 function detail_table(array $results, array $urlToGroup, array $strategies): string {
     $hasM = in_array('mobile', $strategies, true);
     $hasD = in_array('desktop', $strategies, true);
@@ -1376,6 +1591,7 @@ function detail_table(array $results, array $urlToGroup, array $strategies): str
     $thead .= '</tr>';
 
     $rows = '';
+    $recommendedCount = 0;
     $i = 0;
     foreach ($results as $r) {
         $i++;
@@ -1389,25 +1605,44 @@ function detail_table(array $results, array $urlToGroup, array $strategies): str
 
         $detail = page_opts_body($r, $strategies);
         $hasDetail = $detail !== '';
+        $needsImprovement = page_needs_improvement($r, $strategies);
+        if ($needsImprovement) $recommendedCount++;
+        $printClass = $needsImprovement ? ' print-recommended' : ' print-good';
+        $printNumber = $needsImprovement ? (string)$recommendedCount : '';
         $caret   = $hasDetail ? '<span class="caret">▸</span>' : '';
-        $trClass = $hasDetail ? 'page-row has-detail' : 'page-row';
+        $trClass = ($hasDetail ? 'page-row has-detail' : 'page-row') . $printClass;
 
         $rows .= "<tr class=\"$trClass\">"
-               . "<td class=\"num\" data-col=\"0\" data-v=\"$i\">$i</td>"
+               . "<td class=\"num\" data-col=\"0\" data-v=\"$i\">"
+               . "<span class=\"screen-only\">$i</span>"
+               . "<span class=\"print-only\">$printNumber</span></td>"
                . "<td class=\"url-cell\" data-col=\"1\" data-v=\"$short\">$caret"
                . "<a href=\"$urlEsc\" target=\"_blank\" rel=\"noopener\">$short</a></td>"
                . "$gc$mCols$dCols</tr>";
         if ($hasDetail) {
-            $rows .= "<tr class=\"detail-row\" hidden>"
+            $rows .= "<tr class=\"detail-row$printClass\" hidden>"
                    . "<td colspan=\"$total\"><div class=\"opp-body\">$detail</div></td></tr>";
         }
     }
 
+    $pageCount = count($results);
+    $tableClass = $recommendedCount === 0
+        ? 'table-wrap recommendations-table no-recommendations'
+        : 'table-wrap recommendations-table';
+    $recommendationSummary = $recommendedCount === 0
+        ? '<div class="print-only recommendations-empty">No pages scored below 90. No improvements are currently recommended from the automated Lighthouse scores.</div>'
+        : '<div class="print-only recommendations-summary">Showing ' . $recommendedCount . ' of ' . $pageCount
+            . ' pages with at least one Lighthouse category score below 90.</div>';
+
     return <<<HTML
 
-<div class="section-title">Full Results
-  <span class="hint-inline">— click a column header to sort or a row to see its optimizations</span></div>
-<div class="table-wrap">
+<div class="section-title">
+  <span class="screen-only">Full Results</span>
+  <span class="print-only">Recommended Improvements</span>
+  <span class="hint-inline screen-only">— click a column header to sort or a row to see its optimizations</span>
+</div>
+$recommendationSummary
+<div class="$tableClass">
   <table class="sortable">
     <thead>$thead</thead>
     <tbody>$rows</tbody>
@@ -1539,6 +1774,7 @@ function build_html(array $results, array $urlToGroup, array $strategies,
   .opp-list     { margin: 4px 0 0; padding-left: 4px; font-size: 0.8rem; list-style: none; }
   .opp-list li  { margin: 7px 0; line-height: 1.5; }
   .opp-savings  { color: var(--warn); font-size: 0.72rem; }
+  .print-only   { display: none; }
 
   @media (max-width: 600px) {
     body { padding: 0 14px 32px; }
@@ -1554,6 +1790,17 @@ function build_html(array $results, array $urlToGroup, array $strategies,
     body { background: #ffffff; padding: 0; }
     tr.detail-row, tr.detail-row[hidden] { display: table-row !important; }
     .caret, .hint-inline, th[data-col]::after { display: none; }
+    .screen-only { display: none !important; }
+    .print-only { display: inline; }
+    .recommendations-summary, .recommendations-empty {
+      display: block; margin: -5px 0 10px; color: var(--muted); font-size: 0.72rem;
+    }
+    .recommendations-empty {
+      padding: 12px 14px; border: 1px solid var(--accent-line);
+      border-radius: 10px; background: var(--accent-tint); color: var(--body);
+    }
+    tr.page-row.print-good, tr.detail-row.print-good { display: none !important; }
+    .recommendations-table.no-recommendations { display: none; }
     /* Densify tables so every score/metric column fits on the (landscape) page
        instead of being clipped off the right edge. */
     .table-wrap { overflow: visible; border: none; }
@@ -1713,6 +1960,7 @@ function build_csv(array $results, array $urlToGroup, array $strategies): string
 
     $fh = fopen('php://temp', 'r+');
     // Explicit escape: PHP 8.4 deprecates omitting it (default is being removed).
+    // Named arguments keep the intent clear on the PHP 8.2+ runtime baseline.
     fputcsv($fh, $fields, escape: '\\');
     foreach ($results as $r) {
         $row = [$r['url'], $urlToGroup[$r['url']] ?? ''];
@@ -1893,10 +2141,31 @@ function main(array $argv): void {
            . "   (or use --engine=local to run Lighthouse without the API)\n\n";
     }
 
-    // 1 — Collect URLs
-    [$urls, $urlToGroup] = collect_urls($args['sitemap'], $args['max-urls']);
+    // 1 — Discover pages from a sitemap, with a same-site HTML crawl fallback.
+    $startUrl = $args['sitemap'];
+    $urls = [];
+    $urlToGroup = [];
+    if ($args['crawl']) {
+        [$urls, $urlToGroup] = crawl_site(
+            $startUrl, $args['max-urls'], $args['crawl-depth']
+        );
+    } else {
+        $resolved = discover_sitemap($startUrl);
+        if ($resolved !== null) {
+            $args['sitemap'] = $resolved;
+            [$urls, $urlToGroup] = collect_urls($resolved, $args['max-urls']);
+        }
+        if (!$urls) {
+            fwrite(STDERR, "ℹ  No usable sitemap for '{$startUrl}' — falling back to an HTML crawl.\n");
+            $args['sitemap'] = $startUrl;
+            [$urls, $urlToGroup] = crawl_site(
+                $startUrl, $args['max-urls'], $args['crawl-depth']
+            );
+        }
+    }
     if (!$urls) {
-        fwrite(STDERR, "❌  No page URLs found. Verify the sitemap URL is accessible.\n");
+        fwrite(STDERR, "❌  No page URLs found. The site may be unreachable, block automated "
+            . "requests, or have no crawlable links.\n");
         exit(1);
     }
 

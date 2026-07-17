@@ -4,12 +4,13 @@
  * run simultaneously and survive browser disconnects.
  *
  *   scan.php?action=start   (POST)
- *       Validates the form parameters, creates jobs/<id>/, spawns
+ *       Validates the form parameters, creates var/jobs/<id>/ outside the
+ *       public web root, spawns
  *       scan-worker.php as a DETACHED background process, and returns
  *       {"job": "<id>"} as JSON. The HTTP request ends immediately.
  *
  *   scan.php?action=stream&job=<id>   (SSE)
- *       Tails jobs/<id>/events.ndjson — written live by the worker — and
+ *       Tails var/jobs/<id>/events.ndjson — written live by the worker — and
  *       relays each line as a Server-Sent Event. Honors Last-Event-ID, so a
  *       dropped/reconnected EventSource resumes where it left off instead of
  *       replaying (or losing) progress. Closing the stream never affects the
@@ -21,7 +22,7 @@
  *   PHP_CLI_SERVER_WORKERS=32 php -S 127.0.0.1:8082 -t web
  */
 
-const JOBS_DIR    = __DIR__ . '/jobs';
+const JOBS_DIR    = __DIR__ . '/../var/jobs';
 const JOB_MAX_AGE = 172800;   // GC job dirs older than 48 h
 const STREAM_IDLE_LIMIT = 900; // give up if the worker writes nothing for 15 min
 
@@ -49,7 +50,11 @@ function gc_jobs(): void {
 // ── action=start ─────────────────────────────────────────────────────────────
 
 if ($action === 'start') {
-    $in = $_POST + $_GET;   // form posts; GET kept for curl-friendliness
+    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+        header('Allow: POST');
+        json_out(405, ['error' => 'Scan jobs must be started with POST.']);
+    }
+    $in = $_POST;
 
     $mode   = (($in['mode'] ?? 'sitemap') === 'url') ? 'url' : 'sitemap';
     $target = trim((string)($in['sitemap'] ?? ''));
@@ -78,22 +83,30 @@ if ($action === 'start') {
         'workers'    => max(1, min(25, (int)($in['workers'] ?? 15))),
         'max_urls'   => (isset($in['max_urls']) && $in['max_urls'] !== '')
                             ? max(1, (int)$in['max_urls']) : null,
-        // Shared per-key API budget (req/min); not in the form on purpose —
-        // override via query string if your key has a raised Google quota.
+        'crawl'      => $mode === 'sitemap'
+                            && isset($in['crawl']) && $in['crawl'] !== '0',
+        // Shared per-key API budget (req/min); not in the form on purpose.
+        // API clients can override it by adding rate_limit to the POST body.
         'rate_limit' => max(0, (int)($in['rate_limit'] ?? 240)),
     ];
 
-    if (!is_dir(JOBS_DIR) && !@mkdir(JOBS_DIR, 0777, true)) {
+    if (!is_dir(JOBS_DIR) && !@mkdir(JOBS_DIR, 0700, true)) {
         json_out(500, ['error' => 'Could not create the jobs directory.']);
     }
+    @chmod(JOBS_DIR, 0700);
     gc_jobs();
 
-    $jobId  = date('Ymd-His') . '-' . bin2hex(random_bytes(4));
+    $jobId  = date('Ymd-His') . '-' . bin2hex(random_bytes(16));
     $jobDir = JOBS_DIR . '/' . $jobId;
-    if (!@mkdir($jobDir, 0777, true)) {
+    if (!@mkdir($jobDir, 0700, true)) {
         json_out(500, ['error' => 'Could not create the job directory.']);
     }
-    file_put_contents($jobDir . '/params.json', json_encode($params));
+    $paramsFile = $jobDir . '/params.json';
+    if (file_put_contents($paramsFile, json_encode($params), LOCK_EX) === false) {
+        @rmdir($jobDir);
+        json_out(500, ['error' => 'Could not write the job parameters.']);
+    }
+    @chmod($paramsFile, 0600);
 
     // Spawn the worker fully detached: it survives this request and any
     // number of stream connects/disconnects.

@@ -6,9 +6,9 @@
  * that file in headless Chromium (Playwright) and prints it to PDF — a
  * pixel-faithful copy of the on-screen report.
  *
- * Before printing it expands every collapsible per-page detail row in the Full
- * Results table so the PDF is a complete document (nothing hidden behind a
- * click).
+ * Before printing it expands the collapsible detail rows used by the report.
+ * Print CSS then keeps the Recommended Improvements section focused on pages
+ * with Lighthouse category scores below the Good threshold.
  *
  * Usage:  node html-to-pdf.js <input.html> <output.pdf>
  */
@@ -16,6 +16,7 @@ const { chromium } = require('playwright');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { pathToFileURL } = require('url');
 
 // Resilient launch: default headless build, then a full-build fallback for
 // locked-down Linux servers. Override with PSI_CHROME_PATH if needed.
@@ -79,7 +80,7 @@ async function main() {
   const browser = await launchBrowser();
   try {
     const page = await browser.newPage();
-    await page.goto('file://' + path.resolve(input), { waitUntil: 'load' });
+    await page.goto(pathToFileURL(path.resolve(input)).href, { waitUntil: 'load' });
 
     // Reveal every collapsed per-page detail row (and any legacy <details>) so
     // nothing is hidden in print.

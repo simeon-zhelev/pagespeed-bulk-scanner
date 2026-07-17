@@ -1,28 +1,29 @@
 # PageSpeed Bulk Scanner
 
-Scan the performance of **every page of a website** using the [Google PageSpeed Insights API](https://developers.google.com/speed/docs/insights/v5/get-started), in parallel, and get a self-contained HTML dashboard + CSV export.
+Scan the performance of **every page of a website** using the [Google PageSpeed Insights API](https://developers.google.com/speed/docs/insights/v5/get-started), in parallel, and get a self-contained HTML dashboard + CSV export. The scanner uses the XML sitemap when available and otherwise discovers pages by following same-site links.
 
-Works with **WordPress (Yoast SEO)**, **Shopify**, and any site with a standard XML sitemap or sitemap index.
+Works with **WordPress (Yoast SEO)**, **Shopify**, standard XML sitemaps, and sites with no sitemap.
 
 ## Features
 
-- 🗺 **Universal sitemap crawling** — recursively expands sitemap indexes:
+- 🗺 **Universal page discovery** — recursively expands sitemap indexes or falls back to a same-site HTML crawl:
   - Yoast SEO (`sitemap_index.xml`, `post-sitemap.xml`, custom post types)
   - Shopify (`sitemap.xml` with query-string child sitemaps like `sitemap_products_1.xml?from=…&to=…`)
   - Gzipped sitemaps (`.xml.gz`)
   - `<image:loc>` entries excluded; paginated sitemaps (`_1`, `_2`, …) grouped together
+  - Sites without a sitemap are crawled breadth-first from the supplied URL, following same-site HTML links only
 - ⚡ **Parallel scanning** — configurable worker pool built on `curl_multi`, no dependencies beyond stock PHP
 - 📊 **All four Lighthouse categories** — Performance, Accessibility, Best Practices, SEO — for mobile and/or desktop
 - 🎯 **Core Web Vitals per page** — FCP, LCP, TBT, CLS, Speed Index, TTI
 - 🔧 **Optimization opportunities** — site-wide table of failing performance audits ranked by pages affected and estimated savings, plus per-page breakdowns
 - ♿ **Accessibility issues** — WAVE-style automated WCAG checks (missing alt text, contrast errors, missing labels, …) with element counts
 - 📂 **Sitemap group breakdown** — average scores per content type (Posts, Pages, Products, Collections, …)
-- 📄 **Outputs** — dark-themed standalone HTML report, CSV export, optional PDF, console summary
+- 📄 **Outputs** — branded standalone HTML report, CSV export, optional print-optimized PDF, console summary
 - 🔁 **Rate-limit handling** — non-blocking retries with backoff on 429s and transient errors (the worker pool keeps scanning while a failed request waits), plus a **shared per-key rate limiter** so simultaneous scans using the same API key collectively stay under the per-minute quota
 
 ## Quick start
 
-Requires PHP 7.4+ with `curl` and `simplexml` extensions (enabled by default on macOS, most Linux distros, and all common hosting). No Composer, no dependencies. (The optional [PDF export](#pdf-export) adds Node + Playwright — nothing else does.)
+Requires PHP 8.2+ with `curl`, `simplexml`, and `dom` extensions (enabled by default on macOS, most Linux distributions, and common hosting platforms). The scanner validates the PHP version at startup. No Composer dependencies are required. (The optional [PDF export](#pdf-export) adds Node + Playwright — nothing else does.)
 
 ```bash
 # WordPress / Yoast site
@@ -40,13 +41,19 @@ php pagespeed_scanner.php \
   --api-key=YOUR_GOOGLE_API_KEY \
   --strategy=both \
   --workers=15
+
+# Site without a sitemap — pages are discovered by following links
+php pagespeed_scanner.php \
+  --sitemap=https://example.com \
+  --api-key=YOUR_GOOGLE_API_KEY \
+  --max-urls=100
 ```
 
 **Tip:** for a first run on a large site, do a trial with `--max-urls=20` to verify everything works before scanning all pages.
 
 ## Web UI
 
-Prefer a browser to the command line? A small, light-themed landing page is included in `web/`. Enter a **website address** (the sitemap is found automatically) or a sitemap URL, add your API key, pick your options, and it streams **live per-page progress** and shows the full report inline (plus HTML, CSV, and — when the PDF engine is set up — PDF downloads) — no command line needed. A **single-page** mode is also available for scanning one URL.
+Prefer a browser to the command line? A small, responsive landing page is included in `web/`. Enter a **website address** (the sitemap is found automatically, or the site is crawled when none is available) or a sitemap URL, add your API key, pick your options, and it streams **live per-page progress** and shows the full report inline — no command line needed. A **single-page** mode is also available for scanning one URL.
 
 ```bash
 # Start the built-in PHP web server with worker processes (needed for
@@ -56,7 +63,7 @@ PHP_CLI_SERVER_WORKERS=32 php -S 127.0.0.1:8082 -t web
 
 It reuses the exact same engine as the CLI — `pagespeed_scanner.php` — so results are identical. Generated reports are written to `web/reports/` (git-ignored).
 
-**Scans run as background jobs**: submitting the form spawns a detached worker process per scan (progress is journaled to `web/jobs/<id>/` and streamed to the browser via SSE), so
+**Scans run as background jobs**: submitting the form spawns a detached worker process per scan (progress is journaled outside the public web root in `var/jobs/<id>/` and streamed to the browser via SSE), so
 
 - **any number of scans run simultaneously** — open more tabs, or let several teammates scan at once; a shared per-key rate limiter keeps them collectively under the API quota (each scan can also use its own API key, giving every scan its own independent Google quota);
 - **closing the tab doesn't kill a scan** — reconnecting resumes the live progress stream where it left off.
@@ -77,7 +84,9 @@ Without a key the anonymous quota is extremely limited (~2 requests/minute) and 
 
 | Option | Default | Description |
 |---|---|---|
-| `--sitemap` | *(required)* | URL of the sitemap index or any child sitemap |
+| `--sitemap` | *(required)* | Sitemap URL or plain website URL. Site URLs use sitemap auto-discovery with a same-site crawl fallback |
+| `--crawl` | off | Skip sitemap discovery and discover pages by following same-site HTML links |
+| `--crawl-depth` | `0` | Maximum crawl link depth (`0` = unlimited, bounded by `--max-urls` or the 2,000-page safety cap) |
 | `--api-key` | none | Google API key (strongly recommended) |
 | `--strategy` | `both` | `mobile`, `desktop`, or `both` |
 | `--workers` | `15` | Parallel API requests |
@@ -85,15 +94,24 @@ Without a key the anonymous quota is extremely limited (~2 requests/minute) and 
 | `--rate-limit` | `240` | API requests/minute budgeted for this key (240 = the default PSI per-project quota; `0` = off). Shared across simultaneous scans using the same key via a token bucket in the system temp dir |
 | `--output` | `pagespeed_report.html` | HTML report path |
 | `--csv` | `pagespeed_report.csv` | CSV export path |
-| `--pdf[=FILE]` | off | Also export a PDF, rendered from the HTML via headless Chromium. Bare `--pdf` derives the name from `--output` (e.g. `report.pdf`). See [PDF export](#pdf-export) |
+| `--pdf[=FILE]` | off | Also export a print-optimized PDF via headless Chromium. Bare `--pdf` derives the name from `--output` (e.g. `report.pdf`). See [PDF export](#pdf-export) |
 | `--node` | `node` | Path to the Node.js binary (PDF export only) |
 | `--runner` | `./html-to-pdf.js` | Path to the PDF helper script |
 
 ## PDF export
 
-The PDF is a pixel-faithful copy of the HTML dashboard: the same headless
-Chromium opens the finished report and prints it to PDF, expanding the
-collapsible per-page detail rows first so nothing is hidden.
+The PDF uses the same branded dashboard as the HTML report, with a focused
+print layout. The interactive HTML keeps **Full Results** for every scanned
+page. In the PDF, that section is renamed **Recommended Improvements** and
+shows only pages where at least one Lighthouse category score is below `90`
+across the selected mobile and/or desktop strategies. Pages scoring `90–100`
+in every reported category are omitted, and the included rows are renumbered
+consecutively. If every page scores `90+`, the PDF displays a clear all-good
+message instead of an empty table.
+
+Expandable optimization and accessibility details are opened automatically for
+the included recommendation rows, so no actionable information is hidden in
+the printed document.
 
 Because the scan itself is pure PHP, the PDF engine is **optional** — set it up
 once only if you want PDFs:
@@ -130,7 +148,8 @@ Even 25 workers only average ~75 requests/minute (each request is slow), comfort
 2. **By Sitemap Group** — average performance per content type
 3. **Top Optimizations** — failing performance audits ranked by pages affected, with total estimated savings
 4. **Accessibility Issues** — automated WCAG check failures with affected-pages bars and element counts
-5. **Full Results** — every page with all scores and Core Web Vitals; sortable columns, and each row expands to its per-URL optimization and accessibility issues
+5. **Full Results (HTML)** — every page with all scores and Core Web Vitals; sortable columns, and each row expands to its per-URL optimization and accessibility issues
+6. **Recommended Improvements (PDF)** — the print version of Full Results, limited to pages with at least one category score below `90`; included rows are expanded and renumbered for a concise action list
 
 ## Accessibility disclaimer
 
@@ -154,9 +173,9 @@ Cron example — every Monday at 07:00, with dated report files:
 
 **`NOT_HTML` errors** — the sitemap listed a non-HTML resource (KML store-locator file, nested `.xml`, PDF, image, feed). These are now filtered out during crawling and skipped with a note; if one slips through, it's simply reported and doesn't affect the rest of the scan.
 
-**0 URLs found** — confirm the URL returns XML (`curl -I <sitemap-url>`), and that it's a `<sitemapindex>` or `<urlset>` document.
+**0 URLs found** — the site may block automated requests or have no crawlable links. Try a page that links to the rest of the site, supply the sitemap URL directly, or use `--crawl` to bypass sitemap discovery.
 
-**`Call to undefined function curl_init()` / `simplexml_load_string()`** — install the missing extension, e.g. `sudo apt install php-curl php-xml` on Debian/Ubuntu. On macOS the built-in PHP includes both.
+**`Call to undefined function curl_init()` / `simplexml_load_string()` / `Class "DOMDocument" not found`** — install the missing extension, e.g. `sudo apt install php-curl php-xml` on Debian/Ubuntu. On macOS the built-in PHP includes them.
 
 ## Project structure
 
@@ -169,9 +188,9 @@ pagespeed-bulk-scanner/
 │   ├── index.php           #   form + live progress + inline report
 │   ├── scan.php            #   job API: start scans + stream progress (SSE)
 │   ├── scan-worker.php     #   detached per-scan worker process
-│   ├── jobs/               #   per-scan progress journals (git-ignored)
 │   └── reports/            #   generated HTML/CSV/PDF reports (git-ignored)
 │   #   start with: PHP_CLI_SERVER_WORKERS=32 php -S 127.0.0.1:8082 -t web
+├── var/jobs/               # private per-scan progress journals (git-ignored)
 ├── README.md
 ├── LICENSE                 # MIT
 └── .gitignore

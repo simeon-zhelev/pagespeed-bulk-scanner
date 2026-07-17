@@ -195,7 +195,7 @@
   <header class="hero">
     <span class="eyebrow">Google PageSpeed Insights · Lighthouse</span>
     <h1>PageSpeed Bulk Scanner</h1>
-    <p>Audit every page of a website through the PageSpeed Insights API, driven by its XML sitemap. Enter a website address — the sitemap is found automatically — or paste a sitemap URL directly, then watch the scores appear live.</p>
+    <p>Audit every page of a website through the PageSpeed Insights API. Enter a website address — its sitemap is found automatically, or the scanner follows same-site links when there is no sitemap — then watch the scores appear live.</p>
   </header>
 
   <div class="card">
@@ -216,7 +216,7 @@
         </div>
 
         <div class="field full">
-          <label for="sitemap" id="targetLabel">Website or sitemap URL <span class="hint" id="targetHint">— enter a site address to auto-find its sitemap, or paste a sitemap URL</span></label>
+          <label for="sitemap" id="targetLabel">Website or sitemap URL <span class="hint" id="targetHint">— the sitemap is auto-discovered, with a site crawl as fallback</span></label>
           <input type="text" id="sitemap" name="sitemap" required
                  placeholder="example.com  —  or  https://example.com/sitemap_index.xml" autocomplete="off" spellcheck="false">
         </div>
@@ -250,6 +250,13 @@
         <div class="field full" id="maxUrlsField">
           <label for="max_urls">Max pages <span class="hint">— blank = all</span></label>
           <input type="number" id="max_urls" name="max_urls" min="1" placeholder="all (e.g. 20 for a trial)">
+        </div>
+
+        <div class="field check full" id="crawlField">
+          <input type="checkbox" id="crawl" name="crawl">
+          <label for="crawl">Crawl the site directly
+            <span class="hint">Follow same-site links instead of the sitemap; used automatically when no sitemap is found</span>
+          </label>
         </div>
       </div>
 
@@ -307,6 +314,7 @@ const targetInput = document.getElementById('sitemap');
 const targetLabel = document.getElementById('targetLabel');
 const targetHint  = document.getElementById('targetHint');
 const maxUrlsField = document.getElementById('maxUrlsField');
+const crawlField = document.getElementById('crawlField');
 
 function applyMode() {
   const mode = form.mode.value;
@@ -315,12 +323,14 @@ function applyMode() {
     targetHint.textContent = '— the single page to scan';
     targetInput.placeholder = 'https://example.com/pricing';
     maxUrlsField.classList.add('hidden');
+    crawlField.classList.add('hidden');
     submitBtn.textContent = 'Scan page';
   } else {
     targetLabel.childNodes[0].nodeValue = 'Website or sitemap URL ';
-    targetHint.textContent = '— enter a site address to auto-find its sitemap, or paste a sitemap URL';
+    targetHint.textContent = '— the sitemap is auto-discovered, with a site crawl as fallback';
     targetInput.placeholder = 'example.com  —  or  https://example.com/sitemap_index.xml';
     maxUrlsField.classList.remove('hidden');
+    crawlField.classList.remove('hidden');
     submitBtn.textContent = 'Scan website';
   }
 }
