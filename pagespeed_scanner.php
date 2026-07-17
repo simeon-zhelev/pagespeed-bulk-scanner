@@ -20,7 +20,7 @@
  *       --sitemap=https://example.com/sitemap_index.xml \
  *       --api-key=YOUR_GOOGLE_API_KEY \
  *       --strategy=both \
- *       --workers=5 \
+ *       --workers=15 \
  *       --max-urls=50 \
  *       --output=report.html \
  *       --csv=report.csv
@@ -36,7 +36,7 @@ function parse_args(array $argv): array {
         'api-key'  => null,
         'strategy' => 'both',          // mobile | desktop | both
         'max-urls' => null,
-        'workers'  => 5,
+        'workers'  => 15,
         'output'   => 'pagespeed_report.html',
         'csv'      => 'pagespeed_report.csv',
         'pdf'      => null,                        // null = off; set by --pdf[=FILE]
@@ -46,11 +46,12 @@ function parse_args(array $argv): array {
         'cache-ttl' => 86400,                      // cache freshness in seconds (24h)
         'engine'    => 'psi',                      // psi (API) | local (Lighthouse in local Chromium)
         'lh-runner' => __DIR__ . '/lighthouse-runner.js',
+        'rate-limit' => 240,                       // shared per-key API budget, requests/minute (0 = off)
     ];
     $opts = getopt('', [
         'sitemap:', 'api-key:', 'strategy:', 'max-urls:',
         'workers:', 'output:', 'csv:', 'pdf::', 'node:', 'runner:',
-        'cache-dir:', 'cache-ttl:', 'engine:', 'lh-runner:', 'help',
+        'cache-dir:', 'cache-ttl:', 'engine:', 'lh-runner:', 'rate-limit:', 'help',
     ]);
 
     if (isset($opts['help']) || empty($opts['sitemap'])) {
@@ -66,7 +67,7 @@ Options:
   --api-key=KEY     Google PageSpeed Insights API key (strongly recommended)
   --strategy=S      mobile | desktop | both   (default: both)
   --max-urls=N      Cap total URLs scanned
-  --workers=N       Parallel API requests (default: 5, max recommended: 10)
+  --workers=N       Parallel API requests (default: 15, max recommended: 25)
   --output=FILE     HTML report path (default: pagespeed_report.html)
   --csv=FILE        CSV export path  (default: pagespeed_report.csv)
   --pdf[=FILE]      Also export a PDF, rendered from the HTML report via headless
@@ -84,6 +85,11 @@ Options:
                     are sequential and numbers may differ from the PSI ones.
                     Needs Node 18+ (npm install && npx playwright install chromium).
   --lh-runner=PATH  Local Lighthouse helper (default: ./lighthouse-runner.js)
+  --rate-limit=N    API requests per minute budgeted for this key (default: 240,
+                    the PSI per-project quota; 0 = unlimited). The budget is
+                    SHARED across simultaneous scans using the same key via a
+                    token bucket in the system temp dir, so parallel scans
+                    stay under quota together instead of 429-storming.
   --help            Show this help
 
 Examples:
@@ -106,6 +112,7 @@ HELP;
     $args['workers']  = max(1, (int)$args['workers']);
     $args['cache-dir'] = isset($args['cache-dir']) && $args['cache-dir'] !== '' ? (string)$args['cache-dir'] : null;
     $args['cache-ttl'] = max(0, (int)$args['cache-ttl']);
+    $args['rate-limit'] = max(0, (int)$args['rate-limit']);
 
     if (!in_array($args['engine'], ['psi', 'local'], true)) {
         fwrite(STDERR, "❌  --engine must be psi or local\n");
@@ -302,6 +309,22 @@ function sitemap_group_name(string $url): string {
 }
 
 /**
+ * Should this sitemap <loc> be scanned as an HTML page? Sitemaps routinely
+ * list non-HTML resources — KML store-locator files, nested .xml sitemaps,
+ * feeds, PDFs, images, media — which Lighthouse rejects as NOT_HTML. Skipping
+ * them here avoids guaranteed per-page errors and wasted quota.
+ */
+function is_scannable_page_url(string $url): bool {
+    if (!preg_match('#^https?://#i', $url)) return false;
+    $path = strtolower((string)parse_url($url, PHP_URL_PATH));
+    return !preg_match(
+        '/\.(kml|kmz|xml|gz|json|txt|rss|atom|pdf|zip|css|js|map|'
+        . 'jpe?g|png|gif|webp|avif|svg|ico|bmp|tiff?|mp[34]|m4[av]|webm|mov|avi|wmv|wav|ogg|woff2?|ttf|eot)$/',
+        $path
+    );
+}
+
+/**
  * Recursively expand a sitemap or sitemap-index.
  * Returns [urls (ordered, unique), url_to_group map].
  */
@@ -350,6 +373,10 @@ function collect_urls(string $sitemapUrl, ?int $maxUrls = null): array {
                 if ($maxUrls && count($urls) >= $maxUrls) return;
                 $pageUrl = trim((string)$u->loc);
                 if ($pageUrl === '' || isset($urlToGroup[$pageUrl])) continue;
+                if (!is_scannable_page_url($pageUrl)) {
+                    echo "    ⤫  Skipping non-HTML URL: $pageUrl\n";
+                    continue;
+                }
                 $urls[] = $pageUrl;
                 $urlToGroup[$pageUrl] = $group;
             }
@@ -489,8 +516,91 @@ function make_psi_handle(string $requestUrl) {
         CURLOPT_TIMEOUT        => 120,
         CURLOPT_USERAGENT      => 'PageSpeedBulkScanner-PHP/1.0',
         CURLOPT_SSL_VERIFYPEER => true,
+        // PSI JSON bodies run 0.5–2 MB; gzip cuts the transfer ~5–10×.
+        CURLOPT_ENCODING       => '',
     ]);
     return $ch;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Retry policy + shared API rate limiter
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Backoff schedules (seconds before each retry). Retries are NON-blocking:
+// the job is parked with a not-before timestamp while the worker pool keeps
+// draining other jobs — a 429 no longer stalls the whole scan.
+const RETRY_DELAYS_429 = [5, 15, 30];   // HTTP 429 rate-limit responses
+const RETRY_DELAYS_ERR = [3, 8];        // transient failures: curl errors, 5xx, empty body
+// Transient Lighthouse load errors (FAILED_DOCUMENT_REQUEST / ERR_TIMED_OUT …):
+// PSI ran but the target page didn't load in time — often because many workers
+// hit the origin at once and it throttled. Longer waits let the burst clear.
+const RETRY_DELAYS_LH  = [10, 25];
+
+/**
+ * A PSI response can be delivered successfully (non-5xx) yet still report a
+ * *transient* Lighthouse failure — the page load timed out, the render
+ * crashed — which usually passes on a retry. Tell those apart from permanent
+ * failures (NOT_HTML, INVALID_URL) that retrying would only waste quota on.
+ * Scans the raw body with cheap substring checks; a normal success body has
+ * no "runtimeError" so it bails immediately.
+ */
+function psi_error_is_retryable(string $body): bool {
+    if (stripos($body, 'runtimeError') === false
+        && stripos($body, 'Lighthouse returned error') === false) {
+        return false;
+    }
+    foreach (['NOT_HTML', 'INVALID_URL', 'INVALID_MIME'] as $permanent) {
+        if (stripos($body, $permanent) !== false) return false;
+    }
+    foreach (['FAILED_DOCUMENT_REQUEST', 'ERRORED_DOCUMENT_REQUEST', 'ERR_TIMED_OUT',
+              'ERR_CONNECTION', 'ERR_NETWORK', 'ERR_EMPTY_RESPONSE', 'NO_FCP',
+              'TARGET_CRASHED', 'PAGE_HUNG', 'INTERNAL_ERROR', 'PROTOCOL_TIMEOUT'] as $t) {
+        if (stripos($body, $t) !== false) return true;
+    }
+    return false;
+}
+
+/**
+ * Cross-process token bucket, one bucket per API key (or one anonymous
+ * bucket). Sized to the key's per-minute PSI quota so any number of
+ * simultaneous scans sharing a key collectively stay under it instead of
+ * triggering 429 storms. State lives in a small flock()-guarded file in the
+ * system temp dir.
+ *
+ * Returns 0.0 when a token was acquired (send now), otherwise the number of
+ * seconds until the next token is due (park the job and retry then).
+ */
+function rate_limit_acquire(?string $apiKey, int $perMinute): float {
+    if ($perMinute <= 0) return 0.0;    // limiter disabled
+    $file = sys_get_temp_dir() . '/psbs-rate-' . md5('psi|' . (string)$apiKey) . '.json';
+    $fh = @fopen($file, 'c+');
+    if ($fh === false) return 0.0;      // can't persist state — fail open
+    flock($fh, LOCK_EX);
+    $state = json_decode((string)stream_get_contents($fh), true);
+
+    $now  = microtime(true);
+    $rate = $perMinute / 60.0;          // tokens per second
+    $cap  = (float)$perMinute;          // burst allowance = one minute of quota
+    if (!is_array($state) || !isset($state['tokens'], $state['ts'])) {
+        $state = ['tokens' => $cap, 'ts' => $now];
+    }
+    $state['tokens'] = min($cap, (float)$state['tokens'] + ($now - (float)$state['ts']) * $rate);
+    $state['ts'] = $now;
+
+    $wait = 0.0;
+    if ($state['tokens'] >= 1.0) {
+        $state['tokens'] -= 1.0;
+    } else {
+        $wait = (1.0 - $state['tokens']) / $rate;
+    }
+
+    ftruncate($fh, 0);
+    rewind($fh);
+    fwrite($fh, json_encode($state));
+    fflush($fh);
+    flock($fh, LOCK_UN);
+    fclose($fh);
+    return $wait;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -523,7 +633,8 @@ function psi_cache_put(?string $dir, string $url, string $strategy, string $body
  */
 function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
                   ?callable $onEvent = null,
-                  ?string $cacheDir = null, int $cacheTtl = 86400): array {
+                  ?string $cacheDir = null, int $cacheTtl = 86400,
+                  int $rateLimit = 240): array {
     // Build the full job list: one HTTP request per url+strategy pair.
     // Fresh cache hits skip the network entirely (--cache-dir).
     $jobs = [];
@@ -545,7 +656,7 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
                 'strategy' => $strategy,
                 'prefix'   => strtoupper($strategy[0]),     // M or D
                 'request'  => psi_request_url($url, $strategy, $apiKey),
-                'retried'  => false,
+                'attempts' => 0,
             ];
         }
     }
@@ -597,25 +708,52 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
     }
 
     $mh = curl_multi_init();
-    $active = [];   // (int)$ch handle id => job
+    $active  = [];      // (int)$ch handle id => job (in flight)
+    $queue   = $jobs;   // ready to send, waiting for a free worker + rate token
+    $delayed = [];      // parked jobs: retry backoff or rate-limiter wait ('not_before')
 
     $enqueue = function (array $job) use ($mh, &$active): void {
+        unset($job['not_before']);
         $ch = make_psi_handle($job['request']);
         $job['handle'] = $ch;
         $active[(int)$ch] = $job;
         curl_multi_add_handle($mh, $ch);
     };
 
-    // Prime the pool
-    $queue = $jobs;
-    for ($i = 0; $i < $workers && $queue; $i++) {
-        $enqueue(array_shift($queue));
-    }
+    // Keep the pool full: promote parked jobs whose time has come, then start
+    // queued jobs while worker slots are free and the shared per-key rate
+    // limiter grants tokens.
+    $fill = function () use (&$active, &$queue, &$delayed, $workers, $enqueue,
+                             $apiKey, $rateLimit): void {
+        $now = microtime(true);
+        foreach ($delayed as $k => $dj) {
+            if ($dj['not_before'] <= $now) {
+                unset($delayed[$k]);
+                array_unshift($queue, $dj);
+            }
+        }
+        while (count($active) < $workers && $queue) {
+            $wait = rate_limit_acquire($apiKey, $rateLimit);
+            if ($wait > 0) {
+                // Quota spent for the moment — park the next job until a token
+                // is due instead of hammering the API into 429s.
+                $job = array_shift($queue);
+                $job['not_before'] = $now + $wait;
+                $delayed[] = $job;
+                break;
+            }
+            $enqueue(array_shift($queue));
+        }
+    };
+
+    $fill();
 
     do {
         $status = curl_multi_exec($mh, $running);
         if ($running) {
-            curl_multi_select($mh, 1.0);
+            curl_multi_select($mh, 0.5);
+        } elseif ($delayed) {
+            usleep(100000);     // nothing in flight — just waiting out a backoff timer
         }
 
         // Collect finished transfers
@@ -628,21 +766,41 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
             $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $err  = curl_error($ch);
             curl_multi_remove_handle($mh, $ch);
+            unset($job['handle']);
 
             $url    = $job['url'];
             $prefix = $job['prefix'];
 
-            if ($code === 429 && !$job['retried']) {
-                // Rate-limited: requeue once after a pause
+            // Retryable failure? Park the job with a backoff delay and move on —
+            // the rest of the pool keeps working (no blocking sleep).
+            //  • network/5xx/empty       → RETRY_DELAYS_ERR
+            //  • 429 rate-limit          → RETRY_DELAYS_429
+            //  • transient Lighthouse    → RETRY_DELAYS_LH (page load timed out
+            //    even though PSI answered — usually passes once the origin's
+            //    per-burst throttle clears)
+            $transient = $info['result'] !== CURLE_OK || $code >= 500
+                      || $body === false || $body === '';
+            $lhRetry   = !$transient && $code !== 429
+                      && is_string($body) && $body !== ''
+                      && psi_error_is_retryable($body);
+            $schedule  = $code === 429 ? RETRY_DELAYS_429
+                       : ($transient ? RETRY_DELAYS_ERR
+                       : ($lhRetry ? RETRY_DELAYS_LH : null));
+            if ($schedule !== null && $job['attempts'] < count($schedule)) {
+                $delay = $schedule[$job['attempts']];
+                $job['attempts']++;
+                $job['not_before'] = microtime(true) + $delay;
+                $delayed[] = $job;
                 if ($onEvent) {
-                    $onEvent(['phase' => 'rate-limit', 'url' => $url,
-                              'strategy' => $job['strategy']]);
+                    $onEvent(['phase' => 'retry', 'url' => $url,
+                              'strategy' => $job['strategy'],
+                              'code' => $lhRetry ? 'lighthouse' : $code,
+                              'delay' => $delay, 'attempt' => $job['attempts']]);
                 } else {
-                    echo "    ⏳  429 rate-limited ({$job['strategy']}) $url — retrying in 15 s …\n";
+                    $why = $code === 429 ? '429 rate-limited'
+                         : ($lhRetry ? 'Lighthouse load error' : ($err ?: "HTTP $code"));
+                    echo "    ⏳  $why ({$job['strategy']}) $url — retry #{$job['attempts']} in {$delay}s …\n";
                 }
-                sleep(15);
-                $job['retried'] = true;
-                $enqueue($job);
                 continue;
             }
 
@@ -686,12 +844,11 @@ function scan_all(array $urls, array $strategies, ?string $apiKey, int $workers,
                 ]);
             }
 
-            // Feed the pool
-            if ($queue) {
-                $enqueue(array_shift($queue));
-            }
         }
-    } while ($running || $active || $queue);
+
+        // Feed the pool (also promotes parked retries that are due)
+        $fill();
+    } while ($running || $active || $queue || $delayed);
 
     curl_multi_close($mh);
     return $results;
@@ -1705,7 +1862,7 @@ function main(array $argv): void {
     $resultsMap = $args['engine'] === 'local'
         ? scan_local($urls, $strategies, $args, null, $args['cache-dir'], $args['cache-ttl'])
         : scan_all($urls, $strategies, $args['api-key'], $args['workers'],
-                   null, $args['cache-dir'], $args['cache-ttl']);
+                   null, $args['cache-dir'], $args['cache-ttl'], $args['rate-limit']);
 
     // Preserve sitemap order
     $results = [];
