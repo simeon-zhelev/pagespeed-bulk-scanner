@@ -150,7 +150,7 @@
 
         <div class="field">
           <label for="workers">Parallel workers <span class="hint">— 1–25</span></label>
-          <input type="number" id="workers" name="workers" min="1" max="25" value="5">
+          <input type="number" id="workers" name="workers" min="1" max="25" value="15">
         </div>
 
         <div class="field full" id="maxUrlsField">
@@ -271,8 +271,9 @@ function scoreClass(v) {
 
 let es = null;
 let total = 0;
+let lastDone = 0;
 
-form.addEventListener('submit', (e) => {
+form.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (es) es.close();
 
@@ -288,15 +289,23 @@ form.addEventListener('submit', (e) => {
   submitBtn.disabled = true;
   reportFrame.removeAttribute('src');
   total = 0;
+  lastDone = 0;
 
-  // build query string
-  const data = new FormData(form);
-  const params = new URLSearchParams();
-  for (const [k, v] of data.entries()) {
-    if (v !== '') params.set(k, v);
+  // 1 — start the scan as a background job; the scan itself is detached from
+  //     this page, so a reload or dropped connection won't kill it.
+  let job;
+  try {
+    const resp = await fetch('scan.php?action=start', { method: 'POST', body: new FormData(form) });
+    const j = await resp.json();
+    if (!resp.ok || j.error) throw new Error(j.error || ('HTTP ' + resp.status));
+    job = j.job;
+  } catch (err) {
+    showError('Could not start the scan: ' + err.message);
+    return;
   }
 
-  es = new EventSource('scan.php?' + params.toString());
+  // 2 — follow its live progress (SSE resumes automatically on reconnect)
+  es = new EventSource('scan.php?action=stream&job=' + encodeURIComponent(job));
 
   es.addEventListener('status', (ev) => {
     statusMsg.textContent = JSON.parse(ev.data).message;
@@ -313,6 +322,8 @@ form.addEventListener('submit', (e) => {
 
   es.addEventListener('page', (ev) => {
     const d = JSON.parse(ev.data);
+    if (d.done <= lastDone) return;   // duplicate after a stream replay
+    lastDone = d.done;
     total = d.total || total;
     barFill.style.width = (100 * d.done / d.total).toFixed(1) + '%';
     counter.textContent = `${d.done} / ${d.total} requests`;
