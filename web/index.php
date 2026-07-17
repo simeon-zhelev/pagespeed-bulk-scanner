@@ -5,60 +5,112 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PageSpeed Bulk Scanner</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:#f8fafc; --panel:#ffffff; --ink:#1e293b; --muted:#64748b;
-    --line:#e2e8f0; --accent:#2563eb; --accent-ink:#fff;
-    --good:#10b981; --warn:#f59e0b; --poor:#ef4444; --none:#94a3b8;
-    --radius:12px; --shadow:none;
+    --ink:#0F1E33; --body:#33415C; --muted:#64748B; --soft:#94A3B8;
+    --line:#E6EAF1; --line-strong:#C9D4E5; --panel:#ffffff; --bg:#EEF1F5;
+    --accent:#0D8A7E; --accent-ink:#fff; --accent-hover:#0B7468;
+    --accent-tint:#E6F4F2; --accent-line:#BFE3DE;
+    --good:#1F9D5B; --warn:#E3A11F; --poor:#D64541; --none:#94A3B8;
+    --radius:20px; --radius-sm:12px;
+    --shadow:0 1px 2px rgba(15,30,51,.04), 0 12px 30px rgba(15,30,51,.05);
   }
   * { box-sizing:border-box; }
   body {
-    margin:0; font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-    color:var(--ink);
-    background:var(--bg);
-    min-height:100vh;
+    margin:0; font-family:'Source Sans 3', system-ui, -apple-system, Helvetica, Arial, sans-serif;
+    font-size:16px; line-height:1.55; color:var(--body); background:var(--bg); min-height:100vh;
+    -webkit-font-smoothing:antialiased;
   }
-  .wrap { max-width:980px; margin:0 auto; padding:48px 20px 80px; }
-  header.hero { text-align:center; color:var(--ink); margin-bottom:32px; }
-  header.hero h1 { font-size:34px; margin:0 0 10px; letter-spacing:-.02em; color:#0f172a; }
-  header.hero p { margin:0 auto; max-width:620px; color:#475569; }
+  .wrap { max-width:820px; margin:0 auto; padding:56px 20px 80px; }
+
+  header.hero { text-align:center; margin-bottom:32px; }
+  header.hero::before {
+    content:"✦"; display:flex; align-items:center; justify-content:center;
+    width:64px; height:64px; margin:0 auto 22px; font-size:28px; color:var(--accent);
+    background:linear-gradient(160deg,#EAF6F4,#D8EEEA); border-radius:20px;
+    box-shadow:0 8px 20px rgba(13,138,126,.18);
+  }
+  header.hero h1 {
+    font-family:'Poppins', sans-serif; font-weight:700; font-size:clamp(30px, 6.5vw, 44px);
+    margin:0 0 14px; letter-spacing:-.02em; color:var(--ink); line-height:1.05;
+  }
+  header.hero p { margin:0 auto; max-width:560px; font-size:clamp(16px, 3.6vw, 18px); color:var(--muted); }
   header.hero .eyebrow {
-    display:inline-block; font-size:12px; letter-spacing:.14em; text-transform:uppercase;
-    color:#2563eb; background:#eff6ff; border:1px solid #dbeafe; padding:5px 12px; border-radius:999px; margin-bottom:16px;
+    display:inline-block; font-family:'Poppins', sans-serif; font-size:12px; font-weight:600;
+    letter-spacing:.14em; text-transform:uppercase; color:var(--accent);
+    background:var(--accent-tint); border:1px solid var(--accent-line);
+    padding:6px 14px; border-radius:999px; margin-bottom:18px;
   }
-  .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:28px; }
-  form .grid { display:grid; grid-template-columns:1fr 1fr; gap:18px 20px; }
-  .field { display:flex; flex-direction:column; gap:6px; }
+
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); box-shadow:var(--shadow); padding:30px; }
+  form .grid { display:grid; grid-template-columns:1fr 1fr; gap:20px 22px; }
+  .field { display:flex; flex-direction:column; gap:7px; }
   .field.full { grid-column:1 / -1; }
-  label { font-weight:600; font-size:14px; }
-  label .hint { font-weight:400; color:var(--muted); font-size:13px; }
-  label.check { display:flex; align-items:center; gap:10px; cursor:pointer; flex-wrap:wrap; }
-  label.check input { width:17px; height:17px; accent-color:var(--accent); cursor:pointer; flex:none; }
-  label.check .hint { flex-basis:100%; margin-left:27px; }
-  label.check.remember { margin-top:2px; font-size:13px; font-weight:500; }
-  label.check.remember input { width:15px; height:15px; }
+  label { font-family:'Poppins', sans-serif; font-weight:600; font-size:14px; color:var(--ink); }
+  label .hint { font-family:'Source Sans 3', sans-serif; font-weight:400; color:var(--muted); font-size:13px; }
   input[type=text], input[type=url], input[type=number], select {
-    font:inherit; padding:11px 13px; border:1px solid #cbd5e1; border-radius:10px; background:#fff; color:var(--ink);
-    transition:border-color .15s, box-shadow .15s;
+    font:inherit; padding:13px 15px; border:1px solid var(--line-strong); border-radius:var(--radius-sm);
+    background:#fff; color:var(--ink); transition:border-color .15s, box-shadow .15s;
   }
-  input:focus, select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(37,99,235,.15); }
+  input::placeholder { color:var(--soft); }
+  #sitemap { padding:16px 18px; border-radius:14px; font-size:16px; }
+  input:focus, select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px rgba(13,138,126,.15); }
+
   /* segmented control */
-  .seg { display:flex; border:1px solid #cbd5e1; border-radius:10px; overflow:hidden; }
-  .seg label { flex:1; margin:0; text-align:center; padding:10px; cursor:pointer; font-weight:600; font-size:14px; background:#fff; transition:background .12s, color .12s; }
-  .seg label:not(:last-child) { border-right:1px solid #cbd5e1; }
+  .seg { display:flex; border:1px solid var(--line-strong); border-radius:var(--radius-sm); overflow:hidden; background:#fff; }
+  .seg label {
+    flex:1; margin:0; text-align:center; padding:11px 8px; cursor:pointer;
+    font-family:'Poppins', sans-serif; font-weight:600; font-size:14px;
+    background:#fff; transition:background .12s, color .12s;
+  }
+  .seg label:not(:last-child) { border-right:1px solid var(--line-strong); }
   .seg input { display:none; }
   .seg label:has(input:checked) { background:var(--accent); color:#fff; }
-  .actions { margin-top:24px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-  button.primary {
-    font:inherit; font-weight:600; background:var(--accent); color:var(--accent-ink);
-    border:0; padding:13px 26px; border-radius:10px; cursor:pointer; transition:transform .05s, background .15s;
+
+  .check {
+    flex-direction:row; align-items:center; gap:12px;
+    border:1px solid var(--line); border-radius:var(--radius-sm); padding:14px 16px; background:#fff;
+    transition:border-color .15s, background .15s;
   }
-  button.primary:hover { background:#1d4ed8; }
+  .check:hover { border-color:var(--accent-line); background:var(--accent-tint); }
+  .check input { width:18px; height:18px; accent-color:var(--accent); flex:none; }
+  .check label { font-family:'Source Sans 3', sans-serif; font-weight:400; color:var(--body); cursor:pointer; }
+  .check .hint { display:block; margin-top:2px; }
+
+  .actions { margin-top:26px; display:flex; gap:14px; align-items:center; flex-wrap:wrap; }
+  button.primary {
+    font-family:'Poppins', sans-serif; font-weight:700; font-size:16px;
+    background:var(--accent); color:var(--accent-ink);
+    border:0; padding:15px 30px; border-radius:999px; cursor:pointer;
+    transition:transform .05s, background .15s, box-shadow .15s;
+    box-shadow:0 8px 18px rgba(13,138,126,.22);
+  }
+  button.primary:hover { background:var(--accent-hover); }
   button.primary:active { transform:translateY(1px); }
-  button.primary:disabled { opacity:.55; cursor:not-allowed; }
+  button.primary:disabled { opacity:.55; cursor:not-allowed; box-shadow:none; }
   .note { color:var(--muted); font-size:13px; }
   .hidden { display:none !important; }
+
+  /* collapsed form — shown while a scan runs and after it finishes */
+  .formSummary { display:none; align-items:center; gap:12px; }
+  form.minimized .grid, form.minimized .actions { display:none; }
+  form.minimized .formSummary { display:flex; }
+  .formSummary .label { flex:none; font-family:'Poppins', sans-serif; font-weight:600; font-size:14px; color:var(--ink); }
+  .formSummary .target {
+    flex:1; min-width:0; color:var(--body);
+    font-family:'IBM Plex Mono', ui-monospace, monospace; font-size:13px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  button.editBtn {
+    margin-left:auto; flex:none; cursor:pointer;
+    font-family:'Poppins', sans-serif; font-weight:600; font-size:13px;
+    background:#fff; color:var(--accent); border:1px solid var(--accent-line);
+    padding:9px 18px; border-radius:999px; transition:background .15s, border-color .15s;
+  }
+  button.editBtn:hover { background:var(--accent-tint); border-color:var(--accent); }
 
   /* progress + results */
   #run { display:none; margin-top:26px; }
@@ -70,38 +122,72 @@
   }
   .spinner.hidden { display:none; }
   @keyframes spin { to { transform:rotate(360deg); } }
-  #statusMsg { font-weight:600; }
+  #statusMsg { font-family:'Poppins', sans-serif; font-weight:600; color:var(--ink); }
   .bar { height:10px; background:var(--line); border-radius:999px; overflow:hidden; }
-  .bar > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#3b82f6,#2563eb); transition:width .25s; }
+  .bar > i { display:block; height:100%; width:0; background:linear-gradient(90deg,#22B3A2,var(--accent)); transition:width .25s; }
   .counter { font-size:13px; color:var(--muted); margin-top:8px; }
   .log {
-    margin-top:16px; max-height:260px; overflow:auto; border:1px solid var(--line); border-radius:10px;
-    font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:#f8fafc;
+    margin-top:16px; max-height:230px; overflow:auto; border:1px solid var(--line); border-radius:var(--radius-sm);
+    font:13px/1.5 'IBM Plex Mono', ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; background:var(--bg);
   }
-  .log .row { display:flex; gap:10px; padding:6px 12px; border-bottom:1px solid #eef2f7; align-items:center; }
+  .log .row { display:flex; gap:10px; padding:7px 14px; border-bottom:1px solid var(--line); align-items:center; }
   .log .row:last-child { border-bottom:0; }
   .log .badge { flex:none; width:9px; height:9px; border-radius:50%; }
   .log .strat { flex:none; font-size:11px; color:var(--muted); width:54px; }
-  .log .url { color:#334155; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
-  .log .num { flex:none; color:var(--muted); }
+  .log .url { color:var(--body); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+  .log .num { flex:none; color:var(--soft); }
 
   .summary { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:12px; margin:6px 0 18px; }
-  .stat { background:#f8fafc; border:1px solid var(--line); border-radius:12px; padding:14px; text-align:center; }
-  .stat .n { font-size:26px; font-weight:700; line-height:1.1; }
+  .stat { background:var(--bg); border:1px solid var(--line); border-radius:var(--radius-sm); padding:16px; text-align:center; }
+  .stat .n { font-family:'Poppins', sans-serif; font-size:28px; font-weight:700; line-height:1.1; color:var(--ink); }
   .stat .l { font-size:12px; color:var(--muted); margin-top:4px; }
   .stat.good .n { color:var(--good); } .stat.warn .n { color:var(--warn); }
   .stat.poor .n { color:var(--poor); } .stat.none .n { color:var(--none); }
   .resultActions { display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px; }
   a.btn {
-    text-decoration:none; font-weight:600; font-size:14px; padding:10px 18px; border-radius:10px;
-    border:1px solid var(--line); color:var(--ink); background:#fff;
+    text-decoration:none; font-family:'Poppins', sans-serif; font-weight:600; font-size:14px;
+    padding:11px 20px; border-radius:999px; border:1px solid var(--line-strong); color:var(--ink); background:#fff;
+    transition:border-color .15s, background .15s;
   }
-  a.btn.solid { background:var(--accent); color:#fff; border-color:var(--accent); }
-  iframe.report { width:100%; height:680px; border:1px solid var(--line); border-radius:12px; background:#fff; }
-  .errbox { background:#fef2f2; border:1px solid #fecaca; color:#991b1b; padding:14px 16px; border-radius:10px; white-space:pre-wrap; }
-  footer { text-align:center; color:#64748b; font-size:13px; margin-top:34px; }
-  footer a { color:#2563eb; }
-  @media (max-width:640px) { form .grid { grid-template-columns:1fr; } }
+  a.btn:hover { border-color:var(--accent-line); background:var(--accent-tint); }
+  a.btn.solid { background:var(--accent); color:#fff; border-color:var(--accent); box-shadow:0 8px 18px rgba(13,138,126,.22); }
+  a.btn.solid:hover { background:var(--accent-hover); }
+  iframe.report { width:100%; height:680px; border:1px solid var(--line); border-radius:var(--radius-sm); background:#fff; }
+  .errbox { background:#FBEEEB; border:1px solid #E7C3BC; color:#8A2E20; padding:14px 16px; border-radius:var(--radius-sm); white-space:pre-wrap; }
+  footer { text-align:center; color:var(--muted); font-size:13px; margin-top:34px; }
+  footer a { color:var(--accent); }
+
+  /* ── Mobile ──────────────────────────────────────────────────────────────── */
+  @media (max-width:640px) {
+    .wrap { padding:36px 14px 56px; }
+    header.hero { margin-bottom:24px; }
+    header.hero::before { width:56px; height:56px; margin-bottom:18px; font-size:26px; }
+    header.hero .eyebrow { margin-bottom:14px; }
+
+    .card { padding:20px; border-radius:16px; }
+    form .grid { grid-template-columns:1fr; gap:16px; }
+    #sitemap { padding:14px 15px; }
+    .seg label { padding:10px 5px; font-size:13px; }
+
+    .actions { margin-top:20px; flex-direction:column; align-items:stretch; gap:12px; }
+    .actions .note { text-align:center; }
+    button.primary { width:100%; padding:15px 20px; }
+
+    .formSummary { flex-wrap:wrap; }
+    .formSummary .target { flex-basis:100%; order:3; }
+
+    .statusbar { flex-wrap:wrap; }
+    .summary { grid-template-columns:1fr 1fr; }
+    .resultActions { flex-direction:column; }
+    .resultActions a.btn { text-align:center; }
+    iframe.report { height:70vh; min-height:420px; }
+  }
+
+  @media (max-width:340px) {
+    .seg { flex-direction:column; }
+    .seg label:not(:last-child) { border-right:0; border-bottom:1px solid var(--line-strong); }
+    .summary { grid-template-columns:1fr; }
+  }
 </style>
 </head>
 <body>
@@ -114,6 +200,12 @@
 
   <div class="card">
     <form id="form">
+      <div class="formSummary" id="formSummary">
+        <span class="label" id="scanLabel">Scanning</span>
+        <span class="target" id="scanTarget"></span>
+        <button type="button" class="editBtn" id="editBtn">Edit &amp; rescan</button>
+      </div>
+
       <div class="grid">
         <div class="field full">
           <label>Scan mode</label>
@@ -132,10 +224,12 @@
         <div class="field full">
           <label for="api_key">Google API key <span class="hint">— strongly recommended; anonymous quota is tiny</span></label>
           <input type="text" id="api_key" name="api_key" placeholder="AIza…" autocomplete="off" spellcheck="false">
-          <label class="check remember">
-            <input type="checkbox" id="remember_key" checked>
-            Remember on this browser
-            <span class="hint">— stored only in this browser's local storage</span>
+        </div>
+
+        <div class="field check full">
+          <input type="checkbox" id="remember_key" checked>
+          <label for="remember_key">Remember the API key on this browser
+            <span class="hint">Stored only in this browser's local storage</span>
           </label>
         </div>
 
@@ -194,6 +288,9 @@
 const form = document.getElementById('form');
 const runEl = document.getElementById('run');
 const submitBtn = document.getElementById('submitBtn');
+const editBtn = document.getElementById('editBtn');
+const scanLabel = document.getElementById('scanLabel');
+const scanTarget = document.getElementById('scanTarget');
 const spinner = document.getElementById('spinner');
 const statusMsg = document.getElementById('statusMsg');
 const barFill = document.getElementById('barFill');
@@ -257,10 +354,10 @@ apiKeyInput.addEventListener('input', storeApiKey);
 rememberKey.addEventListener('change', storeApiKey);
 
 function scoreColor(v) {
-  if (v === null || v === undefined) return '#94a3b8';
-  if (v >= 90) return '#10b981';
-  if (v >= 50) return '#f59e0b';
-  return '#ef4444';
+  if (v === null || v === undefined) return '#94A3B8';
+  if (v >= 90) return '#1F9D5B';
+  if (v >= 50) return '#E3A11F';
+  return '#D64541';
 }
 function scoreClass(v) {
   if (v === null || v === undefined) return 'none';
@@ -276,6 +373,11 @@ let lastDone = 0;
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   if (es) es.close();
+
+  // Collapse the settings so live progress becomes the focus of the card.
+  scanLabel.textContent = 'Scanning';
+  scanTarget.textContent = targetInput.value.trim();
+  form.classList.add('minimized');
 
   // reset UI
   runEl.classList.add('active');
@@ -333,6 +435,7 @@ form.addEventListener('submit', async (e) => {
   es.addEventListener('done', (ev) => {
     const d = JSON.parse(ev.data);
     finish();
+    scanLabel.textContent = 'Scanned';
     barFill.style.width = '100%';
     statusMsg.textContent = 'Scan complete.';
     renderSummary(d.summary);
@@ -351,6 +454,12 @@ form.addEventListener('submit', async (e) => {
       showError('The connection to the scanner was lost. Check the server console for details.');
     }
   });
+});
+
+// Reveal the preserved settings for another run without clearing the result.
+editBtn.addEventListener('click', () => {
+  form.classList.remove('minimized');
+  targetInput.focus();
 });
 
 function addLogRow(d) {
@@ -404,12 +513,12 @@ function renderActions(d) {
   let html =
     `<a class="btn solid" href="${d.reportUrl}" target="_blank" rel="noopener">Open full report ↗</a>`;
   if (d.pdfUrl) html += `<a class="btn" href="${d.pdfUrl}" download>Download PDF</a>`;
-  html += `<a class="btn" href="${d.csvUrl}" download>Download CSV</a>`;
   resultActions.innerHTML = html;
 }
 
 function showError(msg) {
   finish();
+  scanLabel.textContent = 'Scan failed';
   statusMsg.textContent = 'Scan failed.';
   errorEl.textContent = msg;
   errorEl.hidden = false;

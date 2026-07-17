@@ -1286,8 +1286,8 @@ function group_breakdown(array $results, array $urlToGroup, array $strategies): 
 
     return <<<HTML
 
-<div class="section-title">By Sitemap Group</div>
-<p class="table-hint">Click a column header to sort</p>
+<div class="section-title">By Sitemap Group
+  <span class="hint-inline">— click a column header to sort</span></div>
 <div class="table-wrap" style="margin-top:10px">
   <table class="sortable">
     <thead>
@@ -1405,8 +1405,8 @@ function detail_table(array $results, array $urlToGroup, array $strategies): str
 
     return <<<HTML
 
-<div class="section-title">Full Results</div>
-<p class="table-hint">Click a column header to sort · click a row to see its optimizations</p>
+<div class="section-title">Full Results
+  <span class="hint-inline">— click a column header to sort or a row to see its optimizations</span></div>
 <div class="table-wrap">
   <table class="sortable">
     <thead>$thead</thead>
@@ -1431,6 +1431,9 @@ function build_html(array $results, array $urlToGroup, array $strategies,
     $detailHtml = detail_table($results, $urlToGroup, $strategies);
     $sitemapEsc = htmlspecialchars($sitemapUrl);
     $count      = count($results);
+    $strategyLabel = implode(' + ', array_map('ucfirst', $strategies));
+    $strategyEsc   = htmlspecialchars($strategyLabel);
+    $groupCount    = count(array_unique(array_values($urlToGroup)));
 
     return <<<HTML
 <!DOCTYPE html>
@@ -1441,7 +1444,7 @@ function build_html(array $results, array $urlToGroup, array $strategies,
 <title>PageSpeed Report — $generatedAt</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700&family=Source+Sans+3:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   /* ── Website Health Check report theme (teal) ── */
   :root {
@@ -1451,7 +1454,7 @@ function build_html(array $results, array $urlToGroup, array $strategies,
     --good: #1F9D5B; --warn: #E3A11F; --bad: #D64541;
   }
   *, *::before, *::after { box-sizing: border-box; }
-  body  { font-family: 'IBM Plex Sans', system-ui, Helvetica, Arial, sans-serif;
+  body  { font-family: 'Source Sans 3', system-ui, Helvetica, Arial, sans-serif;
           background: var(--bg-soft); color: var(--body); margin: 0; padding: 0 28px 40px;
           line-height: 1.55; }
   .brandbar { display: flex; align-items: center; gap: 14px; padding: 18px 0 16px;
@@ -1461,23 +1464,36 @@ function build_html(array $results, array $urlToGroup, array $strategies,
     display: grid; place-items: center; }
   .brandbar .logo::before { content: ''; width: 20px; height: 20px; border-radius: 50%;
     background: var(--bg-soft); }
-  .brandbar .brandname { font-family: 'Space Grotesk', sans-serif; font-weight: 700;
+  .brandbar .brandname { font-family: 'Poppins', sans-serif; font-weight: 700;
     font-size: 17px; color: var(--ink); }
   .brandbar .brandctx { color: var(--soft); font-size: 13px; }
   .brandbar .sp { flex: 1; }
-  h1    { font-family: 'Space Grotesk', sans-serif; font-size: 1.6rem; margin: 6px 0 4px; color: var(--ink); }
-  .meta { font-size: 0.8rem; color: var(--muted); margin-bottom: 28px; }
-  .meta strong { color: var(--ink); }
-  .section-title { font-family: 'Space Grotesk', sans-serif; font-size: 0.8rem; font-weight: 700;
+  h1    { font-family: 'Poppins', sans-serif; font-size: 1.6rem; margin: 6px 0 4px; color: var(--ink); }
+
+  /* Friendly run-metadata card row, matching the Accessibility report. */
+  .report-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                 gap: 12px; margin: 14px 0 26px; }
+  .rm-item { background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
+             padding: 12px 16px; min-width: 0; }
+  .rm-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: .07em;
+              color: var(--soft); font-weight: 600; }
+  .rm-value { font-family: 'Poppins', sans-serif; font-weight: 600; color: var(--ink);
+              font-size: 0.95rem; margin-top: 3px; overflow-wrap: anywhere; }
+  .rm-site { grid-column: 1 / -1; }
+  .rm-site .rm-value { word-break: break-all; }
+  .rm-value a { color: var(--accent); text-decoration: none; }
+  .rm-value a:hover { text-decoration: underline; }
+
+  .section-title { font-family: 'Poppins', sans-serif; font-size: 0.8rem; font-weight: 700;
                    color: var(--muted); text-transform: uppercase; letter-spacing: .1em;
                    margin: 32px 0 10px; }
+  .hint-inline { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--soft); }
   .cards { display: flex; flex-wrap: wrap; gap: 12px; }
   .card  { background: var(--bg); border: 1px solid var(--line); border-radius: 12px;
-           padding: 16px 22px; min-width: 148px; flex: 1;
-           box-shadow: 0 1px 2px rgba(15, 23, 42, .04); }
+           padding: 16px 22px; min-width: 148px; flex: 1; }
   .card-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase;
                 letter-spacing: .06em; }
-  .card-score { font-family: 'Space Grotesk', sans-serif; font-size: 2.4rem; font-weight: 700;
+  .card-score { font-family: 'Poppins', sans-serif; font-size: 2.4rem; font-weight: 700;
                 line-height: 1.1; margin: 4px 0; color: var(--ink); }
   .card-sub   { font-size: 0.7rem; color: var(--soft); }
   .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px;
@@ -1486,16 +1502,16 @@ function build_html(array $results, array $urlToGroup, array $strategies,
   th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid var(--line); }
   th     { background: var(--bg-soft); color: var(--muted); font-weight: 600;
            text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+  table.sortable th { cursor: pointer; user-select: none; }
+  table.sortable th:hover { color: var(--accent); }
   td.url-cell { text-align: left; max-width: 280px; overflow: hidden;
                 text-overflow: ellipsis; white-space: nowrap; }
   td.url-cell a { color: var(--accent); text-decoration: none; }
   td.url-cell a:hover { text-decoration: underline; }
   td.gname { text-align: left; font-size: 0.72rem; color: var(--muted); white-space: nowrap; }
-  td.num   { color: var(--soft); width: 32px; }
+  td.num   { color: var(--soft); width: 44px; white-space: nowrap; }
   tr:hover td { background: var(--accent-tint); }
-  .table-hint { font-size: 0.72rem; color: var(--soft); margin: 0 0 6px; }
   /* Sortable headers */
-  th[data-col] { cursor: pointer; user-select: none; }
   th[data-col]::after { content: ' \\2195'; opacity: .35; font-size: 0.85em; }
   th[data-col][data-dir="asc"]::after  { content: ' \\2191'; opacity: 1; }
   th[data-col][data-dir="desc"]::after { content: ' \\2193'; opacity: 1; }
@@ -1504,7 +1520,7 @@ function build_html(array $results, array $urlToGroup, array $strategies,
   .caret { display: inline-block; margin-right: 5px; color: var(--accent);
            font-size: 0.7rem; transition: transform .15s; }
   tr.has-detail.open .caret { transform: rotate(90deg); }
-  tr.detail-row > td { text-align: left; background: var(--bg-soft); padding: 12px 16px; }
+  tr.detail-row > td { text-align: left; background: var(--bg-soft); padding: 4px 14px 10px; }
   tr.detail-row:hover > td { background: var(--bg-soft); }
   .legend { margin-top: 20px; font-size: 0.72rem; color: var(--muted); }
   .dot    { display:inline-block; width:9px; height:9px; border-radius:50%;
@@ -1513,22 +1529,31 @@ function build_html(array $results, array $urlToGroup, array $strategies,
   td.opp-title { text-align: left; }
   .pgbar  { position: relative; background: var(--bg-soft); border: 1px solid var(--line);
             border-radius: 6px; height: 18px; min-width: 160px; overflow: hidden; }
-  .pgfill { background: var(--accent); height: 100%; border-radius: 6px; opacity: .7; }
+  .pgfill { background: var(--accent); height: 100%; border-radius: 6px; opacity: .85; }
   .a11yfill { background: #a855f7; }
   .pgtext { position: absolute; inset: 0; display: flex; align-items: center;
             justify-content: center; font-size: 0.7rem; color: var(--ink); }
-  .opp-body     { margin-top: 4px; }
-  .opp-strategy { font-size: 0.72rem; font-weight: 700; color: var(--muted);
+  .opp-body     { margin-top: 8px; }
+  .opp-strategy { font-family: 'Poppins', sans-serif; font-size: 0.72rem; font-weight: 700; color: var(--muted);
                   margin-top: 8px; text-transform: uppercase; letter-spacing: .05em; }
-  .opp-list     { margin: 4px 0 0; padding-left: 18px; font-size: 0.78rem; }
-  .opp-list li  { margin: 3px 0; }
+  .opp-list     { margin: 4px 0 0; padding-left: 4px; font-size: 0.8rem; list-style: none; }
+  .opp-list li  { margin: 7px 0; line-height: 1.5; }
   .opp-savings  { color: var(--warn); font-size: 0.72rem; }
+
+  @media (max-width: 600px) {
+    body { padding: 0 14px 32px; }
+    .report-meta { gap: 8px; }
+    .cards { gap: 8px; }
+    .card { min-width: 132px; padding: 14px 16px; }
+    .section-title { margin-top: 26px; }
+  }
+
   /* PDF export: drop the grey page background so the print is clean white,
      and reveal every collapsed per-page detail so nothing is hidden. */
   @media print {
     body { background: #ffffff; padding: 0; }
     tr.detail-row, tr.detail-row[hidden] { display: table-row !important; }
-    .caret, .table-hint, th[data-col]::after { display: none; }
+    .caret, .hint-inline, th[data-col]::after { display: none; }
     /* Densify tables so every score/metric column fits on the (landscape) page
        instead of being clipped off the right edge. */
     .table-wrap { overflow: visible; border: none; }
@@ -1549,10 +1574,27 @@ function build_html(array $results, array $urlToGroup, array $strategies,
   <span class="brandctx">PageSpeed report · powered by 2create</span>
 </header>
 <h1>PageSpeed Bulk Report</h1>
-<div class="meta">
-  Sitemap: <strong>$sitemapEsc</strong> &nbsp;|&nbsp;
-  Pages tested: <strong>$count</strong> &nbsp;|&nbsp;
-  Generated: <strong>$generatedAt</strong>
+<div class="report-meta">
+  <div class="rm-item rm-site">
+    <div class="rm-label">Scan target / sitemap</div>
+    <div class="rm-value"><a href="$sitemapEsc" target="_blank" rel="noopener">$sitemapEsc</a></div>
+  </div>
+  <div class="rm-item">
+    <div class="rm-label">Pages tested</div>
+    <div class="rm-value">$count</div>
+  </div>
+  <div class="rm-item">
+    <div class="rm-label">Strategies</div>
+    <div class="rm-value">$strategyEsc</div>
+  </div>
+  <div class="rm-item">
+    <div class="rm-label">Sitemap groups</div>
+    <div class="rm-value">$groupCount</div>
+  </div>
+  <div class="rm-item">
+    <div class="rm-label">Generated</div>
+    <div class="rm-value">$generatedAt</div>
+  </div>
 </div>
 
 $summary
